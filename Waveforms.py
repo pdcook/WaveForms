@@ -3,11 +3,16 @@ import pyaudio
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button, RadioButtons
 
-ROWS = 8
-COLS = 2
+LEFT = 0.05
+RIGHT = 0.95
+TOP = 0.995
+BOTTOM = 0.005
+
+
+COLS = 3
 
 # start PyAudio
-#pa = pyaudio.PyAudio()
+pa = pyaudio.PyAudio()
 
 class WaveForm:
     """
@@ -16,12 +21,15 @@ class WaveForm:
         Attributes
             name - Name of the waveform which will be displayed
 
-            (Optional)
+            (Optional) [Default]
                 Teq - The time-domain equation of the nth term of the Fourier
                         series of the waveform
 
                 Feq - The equation of the nth term of the Fourier series of the
                         waveform
+
+                nmax [76] - highest order term in the Fourier series / the
+                        highest harmonic to be used, must be even
 
         Methods
 
@@ -37,15 +45,72 @@ class WaveForm:
 
     """
 
-    def __init__(self, name, Teq = None, Feq = None, **kwargs):
+    def __init__(self, name, Teq = None, Feq = None, nmax = 76, **kwargs):
         self.name   = name
         self.Teq    = Teq
         self.Feq    = Feq
+        self.nmax   = nmax
         self.kwargs = kwargs
 
         if Teq is None and Feq is None:
             raise RuntimeError("At least one of Teq and Feq must be specified \
 for WaveForm: %s" %name)
+
+        if nmax % 2 != 0:
+            raise RuntimeError("nmax must be even for WaveForm: %s" %name)
+
+    def getWaveform(self, volume = 0.5, sample_rate = 44100, \
+        duration = None, freq = 440):
+        """
+            getWaveform - Returns the waveform in an array
+
+            Parameters
+                (Optional) [Default]
+                    volume [0.5] - Float between 0.0 and 1.0 (min and max vol)
+
+                    sample_rate [44100] - The sample rate as an integer
+
+                    duration [1/freq] - The duration in seconds
+
+                    freq [440] - Frequency the waveform is played at (in Hz)
+
+            Returns
+                waveform - the time-domain waveform as a Numpy array
+        """
+
+        if duration is None: duration = 1/freq
+
+        # generate the waveform by summing terms in Teq
+        waveform = np.sum(self.Teq( \
+            np.arange(1,int(self.nmax/2+1))[:,np.newaxis], \
+            np.linspace(0, duration, int(round(duration*sample_rate))), freq,
+            **self.kwargs), axis = 0)
+
+        return waveform
+
+    def playWave(self, volume = 0.5, sample_rate = 44100, duration = 20, \
+        freq = 440):
+        """
+            playWave - Play a WaveForm object, wrapper for PlayWave
+
+            Parameters
+                (Optional) [Default]
+                    volume [0.5] - Float between 0.0 and 1.0 (min and max vol)
+
+                    sample_rate [44100] - The sample rate as an integer
+
+                    duration [20] - The duration in seconds
+
+                    freq [440] - Frequency the waveform is played at (in Hz)
+
+            Returns
+                None
+        """
+
+        PlayWave(self.getWaveform(volume, sample_rate, duration, freq), \
+            volume, sample_rate, duration, freq)
+
+
 
 def PlayWave(waveform, volume = 0.5, sample_rate = 44100, duration = 20, \
     freq = 440):
@@ -54,18 +119,17 @@ def PlayWave(waveform, volume = 0.5, sample_rate = 44100, duration = 20, \
                     truncated to reach the desired duration
 
         Parameters
-            waveform - A numpy array of the waveform to be played, must be able
-                to be converted to float32
+            waveform - A numpy array of the waveform to be played, must be
+                able to be converted to float32
 
-            (Optional)
-                volume - Float between 0.0 and 1.0 (min and max volume)
+            (Optional) [Default]
+                volume [0.5] - Float between 0.0 and 1.0 (min and max vol)
 
-                sample_rate - The sample rate as an integer
+                sample_rate [44100] - The sample rate as an integer
 
-                duration - The duration in seconds
+                duration [20] - The duration in seconds
 
-                freq - Frequency the waveform is played at
-
+                freq [440] - Frequency the waveform is played at (in Hz)
 
         Returns
             None
@@ -91,12 +155,12 @@ def PlayWave(waveform, volume = 0.5, sample_rate = 44100, duration = 20, \
                     output=True)
 
     # play. May repeat with different volume values (if done interactively)
-    stream.write(volume*waveform)
+    stream.write(volume*waveform.astype(np.float32))
 
     stream.stop_stream()
     stream.close()
 
-def Draw():
+def Draw(waveforms):
     """
         Draw - Draws the window and runs the main control loop
 
@@ -107,44 +171,82 @@ def Draw():
             None
     """
 
+    sample_rate = 44100
+    freq = 440
+    wavelengths = 3
+
+    try:
+        ROWS = waveforms.size + 1
+    except:
+        ROWS = len(waveforms) + 1
+
     # create figure and axes with ROWS x COLS separate plots
     fig, axes = plt.subplots(ROWS+1, COLS+2)
 
     # create the mixed scope
     grid = plt.GridSpec(ROWS+1,COLS+2)
     axes[ROWS,0] = plt.subplot(grid[~0,:int(COLS/2)+1])
-    axes[ROWS,1] = plt.subplot(grid[~0,~int(COLS/2):])
+    axes[ROWS,1] = plt.subplot(grid[~0,~int(COLS/2)-1])
 
-    grid2 = fig.add_gridspec(ROWS+1, COLS+2, left = 0.125, right = 0.9, \
-        bottom = 0.1, top = 0.9, wspace=1, hspace=1)
+    grid2 = fig.add_gridspec(ROWS+1, (COLS+2)*2, left = LEFT, right = RIGHT, \
+        bottom = BOTTOM, top = TOP, wspace=1, hspace=1)
 
     # plot all waveforms before formatting
-    axes[0,0].plot(np.sin(2*np.pi*np.linspace(0,1,100)))
+    for row in range(1,ROWS):
+        axes[row, 0].plot(waveforms[row-1].getWaveform(1, sample_rate, wavelengths/freq, freq))
 
-    sliders = [0 for _ in range(ROWS)]
-    buttons = [0 for _ in range(ROWS)]
+    sliders = np.empty(ROWS+1, dtype=object)
+    buttons = np.empty(ROWS+1, dtype=object)
+    for i in range(ROWS+1):
+        sliders[i] = {}
+        buttons[i] = {}
 
-    # remove ticks from all plots
+    axes = np.pad(axes,((0,0),(0,COLS+2)), mode='constant', constant_values=None)
+
+    # remove ticks from all plots and add sliders
     for row,ax in enumerate(axes):
         for col,a in enumerate(ax):
-            if col >= COLS and row < ROWS:
-                a.set_visible(False)
-                axes[row,col] = fig.add_subplot(grid2[row,col])
-                if col == COLS+1: sliders[row] = Slider(axes[row,col], \
-                    "Level", 0, 10, valinit=5)
-                if col == COLS: buttons[row] = Button(axes[row,col], "Play")
+            if col >= COLS or row == 0:
+                try: a.set_visible(False)
+                except: pass
+
+                # add oscilator 1 and 2 freq. level
+                if row == 0:
+                    if col < 2: axes[row,col] = fig.add_subplot(grid2[row,2*col:2*col+2])
+                    if col == 0: sliders[row]["OSC1"] = Slider(axes[row,col], \
+                        "OSC1\nFreq.", 8.18, 12500, valinit=440)
+                    elif col == 1: sliders[row]["OSC2"] = Slider(axes[row,col], \
+                        "OSC2\nFreq.", 8.18, 12500, valinit=440)
+
+                # add play and reset buttons, and mixing sliders
+                else:
+                    if col == 2*COLS+2 and row < ROWS:
+                        axes[row,col] = fig.add_subplot(grid2[row,col])
+                        sliders[row]["OSC1"] = Slider(axes[row,col], "OSC1\nLevel", 0, 10, valinit=5)
+                    elif col == 2*COLS+3 and row < ROWS:
+                        axes[row,col] = fig.add_subplot(grid2[row,col])
+                        sliders[row]["OSC2"] = Slider(axes[row,col], "OSC2\nLevel", 0, 10, valinit=5)
+                    elif col == 2*COLS:
+                        axes[row,col] = fig.add_subplot(grid2[row,col])
+                        buttons[row]["Play"] = Button(axes[row,col], "Play")
+                    elif col == 2*COLS+1:
+                        axes[row,col] = fig.add_subplot(grid2[row,col])
+                        buttons[row]["Reset"] =Button(axes[row,col], "Reset")
                 continue
-            a.set_xticklabels([])
-            a.set_yticklabels([])
-            a.set_xticks([])
-            a.set_yticks([])
-            a.set_xlim(a.get_xlim())
-            a.plot([a.get_xlim()[0], a.get_xlim()[~0]],[0,0], \
-                linestyle = "solid", color = "darkgrey", linewidth=1, zorder=0)
+            elif a is None: pass
+            try:
+                a.set_xticklabels([])
+                a.set_yticklabels([])
+                a.set_xticks([])
+                a.set_yticks([])
+                a.set_xlim(a.get_xlim())
+                a.plot([a.get_xlim()[0], a.get_xlim()[~0]],[0,0], \
+                    linestyle = "solid", color = "darkgrey", linewidth=1, zorder=0)
+            except: pass
 
 
     # remove space between plots
-    plt.subplots_adjust(left = 0.125, right = 0.9, bottom = 0.1, top = 0.9, \
+    plt.subplots_adjust(left = LEFT, right = RIGHT, bottom = BOTTOM, top = TOP, \
                             wspace=0, hspace=0)
 
 
@@ -152,16 +254,37 @@ def Draw():
 
 # Triangle WaveForm
 def Triangle_Teq(n,t,f):
-    return 8*(-(-1)**n)*sin((2*n-1)*2*pi*f*x)/((2*n-1)*pi)**2
+    return 8*(-(-1)**n)*np.sin((2*n-1)*2*np.pi*f*t)/((2*n-1)*np.pi)**2
 
 Triangle = WaveForm("Triangle", Triangle_Teq)
 
 # Pulse WaveForm (example of **kwargs)
 def Pulse_Teq(n, t, f, **kwargs):
     d = kwargs["duty"]  # percent duty cycle of the pulse
-    return 2*sin(n*pi*d/100.)*cos(n*2*pi*f*(x-(d/(100.*f))/2))/(n*pi)
+    return 2*np.sin(n*np.pi*d/100.)*np.cos(n*2*np.pi*f*(t-(d/(100.*f))/2))/(n*np.pi)
 
-Pulse = WaveForm("Pulse", Pulse_Teq, duty = 50)
+Pulse = WaveForm("Pulse", Pulse_Teq, duty = 10)
+
+# Square WaveForm
+def Square_Teq(n, t, f):
+    return 4*np.sin((2*n-1)*2*np.pi*f*t)/((2*n-1)*np.pi)
+
+Square = WaveForm("Square", Square_Teq)
+
+# Sine WaveForm
+def Sine_Teq(n, t, f):
+    return (n==1).astype(int)*np.sin(2*np.pi*f*t)
+
+Sine = WaveForm("Sine", Sine_Teq)
+
+WAVEFORMS = [Triangle, Pulse, Square, Sine]
+
+#Triangle.playWave(duration = 2)
+#Pulse.playWave(duration = 2)
+#Square.playWave(duration = 2)
+#Sine.playWave(duration = 2)
+
+Draw(WAVEFORMS)
 
 # end PyAudio
-#pa.terminate()
+pa.terminate()
