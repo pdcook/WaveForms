@@ -4,10 +4,33 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button, RadioButtons
 from functools import partial
 
+
+"""
+    TODO
+
+    [ ] - Allow animations for arbitrary waveforms in order for Pulse and WhiteNoise to work
+    [ ] - Add LFO frequency bars for Pulse duty cycle (add ability for arbitrary extra parameter vertical sliders (default min/max to 0 to 1 and let the user deal with it)
+        |
+        |   No idea how to do these two because I don't understand the LFO sweeping the duty cycle...
+        |   If the LFO and the audio sample are at the same sample rate, then one full wavelength of a pulse with a given duty cycle will never exist
+        |   How is this actually generated?
+
+    [ ] - Add reset button functionality
+    [X] - Add frequency slider functionality
+    [ ] - Add global volume/duration/wavelength view sliders
+    [ ] - Clean up global sample_rate variable, allow user to set it in the code
+    [ ] - Add mixer
+    [ ] - Fourier transforms
+
+"""
+
 LEFT = 0.05
 RIGHT = 0.95
 TOP = 0.995
 BOTTOM = 0.005
+
+OSC1freq = 440
+OSC2freq = 440
 
 
 COLS = 3
@@ -126,7 +149,7 @@ specified for WaveForm: %s" %name)
         PlayWave(self.getWaveform(volume, sample_rate, duration, freq), \
             volume, sample_rate, duration, freq)
 
-    def playButton(self, event, volume, sample_rate, duration, freq):
+    def playButton(self, event, volume, sample_rate, duration):
         """
             playButton - Translates a button press to playWave
 
@@ -137,7 +160,9 @@ specified for WaveForm: %s" %name)
                 None
         """
 
-        self.playWave(volume, sample_rate, duration, freq)
+        global OSC1freq
+
+        self.playWave(volume, sample_rate, duration, OSC1freq)
 
 
 
@@ -200,9 +225,11 @@ def Draw(waveforms):
             None
     """
 
+    global OSC1freq
+    global OSC2freq
+
     volume = 0.5
     sample_rate = 44100
-    freq = 440
     duration = 10
     wavelengths = 3
 
@@ -222,12 +249,10 @@ def Draw(waveforms):
     grid2 = fig.add_gridspec(ROWS+1, (COLS+2)*2, left = LEFT, right = RIGHT, \
         bottom = BOTTOM, top = TOP, wspace=1, hspace=1)
 
-    # plot all waveforms before formatting
-    for row in range(1,ROWS):
-        axes[row, 0].plot(waveforms[row-1].getWaveform(1, sample_rate, \
-                            wavelengths/freq, freq))
-        axes[row, 1].plot(waveforms[row-1].getWaveform(1, sample_rate, \
-                            wavelengths/freq, freq))
+    # arrays to save the line objects from each oscillator
+    OSC1 = np.empty(ROWS, dtype = object)
+    OSC2 = np.empty(ROWS, dtype = object)
+
 
     sliders      = np.empty(ROWS+1, dtype = object)
     buttons      = np.empty(ROWS+1, dtype = object)
@@ -258,7 +283,75 @@ def Draw(waveforms):
             button = button["Play"]     # only modify the 'Play' button
 
             if row < ROWS:
-                button.on_clicked(partial(waveforms[row-1].playButton,volume=volume, sample_rate=sample_rate, duration=duration, freq=freq))
+                button.on_clicked(partial(waveforms[row-1].playButton, \
+                    volume=volume, sample_rate=sample_rate, duration=duration))
+
+    def updateFreqs(val):
+        """
+            updateFreqs - Updates the freq. of both OSC1 and OSC2 and plots
+
+            Parameters
+                val - Value returned by slider which called the function
+
+            Returns
+                None
+        """
+
+        global OSC1freq
+        global OSC2freq
+        OSC1freq = sliders[0]["OSC1"].val
+        OSC2freq = sliders[0]["OSC2"].val
+        plotWaveforms(False, OSC1freq, OSC2freq)
+
+    def plotWaveforms(init, OSC1freq, OSC2freq):
+        """
+            plotWaveforms - Draws the waveforms in the window
+
+            Parameters
+                init - Boolean which should be True if this is the first plot
+
+                OSC1freq - The frequency of OSC1 in hertz
+
+                OSC2freq - The frequency of OSC2 in hertz
+
+            Returns
+                None
+        """
+
+        nonlocal OSC1
+        nonlocal OSC2
+
+        if init:
+            for row in range(1,ROWS):
+                OSC1[row], = axes[row, 0].plot(waveforms[row-1].getWaveform(1,\
+                                    sample_rate, wavelengths/OSC1freq, \
+                                    OSC1freq))
+                OSC2[row], = axes[row, 1].plot(waveforms[row-1].getWaveform(1,\
+                                    sample_rate, wavelengths/OSC1freq, \
+                                    OSC2freq))
+                # the use of OSC1freq in the calculation for the duration of
+                #   OSC2 in the line above may appear to be a mistake, but it
+                #   is deliberate in order for the difference in freq. between
+                #   OSC1 and OSC2 to be shown
+
+        else:
+            for row in range(1,ROWS):
+                waveform_ = waveforms[row-1].getWaveform(1, \
+                                sample_rate, wavelengths/OSC1freq, OSC1freq)
+                xdata = np.arange(waveform_.size)
+                OSC1[row].set_data(xdata, waveform_)
+                axes[row,0].set_xlim([0,waveform_.size-1])
+
+                waveform_ = waveforms[row-1].getWaveform(1, \
+                                sample_rate, wavelengths/OSC1freq, OSC2freq)
+                xdata = np.arange(waveform_.size)
+                OSC2[row].set_data(xdata, waveform_)
+                axes[row,1].set_xlim([0,waveform_.size-1])
+
+            fig.canvas.draw_idle()
+
+    # plot all waveforms before formatting
+    plotWaveforms(True, OSC1freq, OSC2freq)
 
     # remove ticks from all plots and add sliders
     for row,ax in enumerate(axes):
@@ -274,12 +367,17 @@ def Draw(waveforms):
                     if col < 2: axes[row,col] = \
                         fig.add_subplot(grid2[row,2*col:2*col+2])
 
-                    if col == 0: sliders[row]["OSC1"] = Slider(axes[row,col], \
-                        "OSC1\nFreq.", 16.351597, 4186.009045, valinit=440)
+                    if col == 0:
+                        sliders[row]["OSC1"] = Slider(axes[row,col], \
+                            "OSC1\nFreq.", 16.351597, 4186.009045, \
+                            valinit=OSC1freq)
+                        sliders[row]["OSC1"].on_changed(updateFreqs)
 
-                    elif col == 1: sliders[row]["OSC2"] = \
-                        Slider(axes[row,col], \
-                        "OSC2\nFreq.", 16.351597, 4186.009045, valinit=440)
+                    elif col == 1:
+                        sliders[row]["OSC2"] = Slider(axes[row,col], \
+                            "OSC2\nFreq.", 16.351597, 4186.009045, \
+                            valinit=OSC2freq)
+                        sliders[row]["OSC2"].on_changed(updateFreqs)
 
                 # add play and reset buttons, and mixing sliders
                 else:
@@ -305,18 +403,18 @@ def Draw(waveforms):
 
             elif a is None: pass
 
-            try:
-                a.set_xticklabels([])
-                a.set_yticklabels([])
-                a.set_xticks([])
-                a.set_yticks([])
-                a.set_xlim(a.get_xlim())
-                a.set_ylim([-1.2,1.2])
-                a.plot([a.get_xlim()[0], a.get_xlim()[~0]],[0,0], \
-                    linestyle = "solid", color = "darkgrey", \
-                    linewidth=1, zorder=0)
-
-            except: pass
+            a.set_xticklabels([])
+            a.set_yticklabels([])
+            a.set_xticks([])
+            a.set_yticks([])
+            a.set_xlim(a.get_xlim())
+            if row < ROWS:
+                if col == 0: a.set_xlim([0,OSC1[row].get_xdata().size-1])
+                if col == 1: a.set_xlim([0,OSC2[row].get_xdata().size-1])
+            a.set_ylim([-1.2,1.2])
+            a.plot([-1*sample_rate*100, sample_rate*100],[0,0], \
+                linestyle = "solid", color = "darkgrey", \
+                linewidth=1, zorder=0)
 
     # assign buttons their functions
     assignButtons(volume, sample_rate, duration)
