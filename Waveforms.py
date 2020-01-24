@@ -17,7 +17,7 @@ from functools import partial
 
     [ ] - Add reset button functionality
     [X] - Add frequency slider functionality
-    [ ] - Add global volume/duration/wavelength view sliders
+    [X] - Add global volume/duration/wavelength view sliders
     [ ] - Clean up global sample_rate variable, allow user to set it in the code
     [ ] - Add mixer
     [ ] - Fourier transforms
@@ -31,6 +31,9 @@ BOTTOM = 0.005
 
 OSC1freq = 440
 OSC2freq = 440
+
+DURATION = 10
+VOLUME = 0.5
 
 
 COLS = 3
@@ -149,7 +152,7 @@ specified for WaveForm: %s" %name)
         PlayWave(self.getWaveform(volume, sample_rate, duration, freq), \
             volume, sample_rate, duration, freq)
 
-    def playButton(self, event, volume, sample_rate, duration):
+    def playButton(self, event, sample_rate):
         """
             playButton - Translates a button press to playWave
 
@@ -162,9 +165,7 @@ specified for WaveForm: %s" %name)
 
         global OSC1freq
 
-        self.playWave(volume, sample_rate, duration, OSC1freq)
-
-
+        self.playWave(VOLUME, sample_rate, DURATION, OSC1freq)
 
 def PlayWave(waveform, volume = 0.5, sample_rate = 44100, duration = 20, \
     freq = 440):
@@ -228,10 +229,8 @@ def Draw(waveforms):
     global OSC1freq
     global OSC2freq
 
-    volume = 0.5
     sample_rate = 44100
-    duration = 10
-    wavelengths = 3
+    wavelengths = 5
 
     try:
         ROWS = waveforms.size + 1
@@ -246,14 +245,17 @@ def Draw(waveforms):
     axes[ROWS,0] = plt.subplot(grid[~0,:int(COLS/2)+1])
     axes[ROWS,1] = plt.subplot(grid[~0,~int(COLS/2)-1])
 
+    # grids for the sliders and buttons
     grid2 = fig.add_gridspec(ROWS+1, (COLS+2)*2, left = LEFT, right = RIGHT, \
+        bottom = BOTTOM, top = TOP, wspace=1, hspace=1)
+    grid3 = fig.add_gridspec((ROWS+1)*3, COLS+2, left = LEFT, right = RIGHT, \
         bottom = BOTTOM, top = TOP, wspace=1, hspace=1)
 
     # arrays to save the line objects from each oscillator
     OSC1 = np.empty(ROWS, dtype = object)
     OSC2 = np.empty(ROWS, dtype = object)
 
-
+    # arrays to save the slider and button objects
     sliders      = np.empty(ROWS+1, dtype = object)
     buttons      = np.empty(ROWS+1, dtype = object)
     for i in range(ROWS+1):
@@ -263,7 +265,7 @@ def Draw(waveforms):
     axes = np.pad(axes,((0,0),(0,COLS+2)), \
             mode='constant', constant_values=None)
 
-    def assignButtons(volume, sample_rate, duration):
+    def assignButtons(sample_rate):
         """
             assignButtons - Assigns all 'Play' buttons their functions
 
@@ -284,7 +286,7 @@ def Draw(waveforms):
 
             if row < ROWS:
                 button.on_clicked(partial(waveforms[row-1].playButton, \
-                    volume=volume, sample_rate=sample_rate, duration=duration))
+                    sample_rate=sample_rate))
 
     def updateFreqs(val):
         """
@@ -301,6 +303,54 @@ def Draw(waveforms):
         global OSC2freq
         OSC1freq = sliders[0]["OSC1"].val
         OSC2freq = sliders[0]["OSC2"].val
+        plotWaveforms(False, OSC1freq, OSC2freq)
+
+    def updateVolume(val):
+        """
+            updateVolume - Updates the volume of playback
+
+            Parameters
+                val - Value returned by slider which called the function
+
+            Returns
+                None
+        """
+
+        global VOLUME
+
+        VOLUME = sliders[0]["volume"].val
+
+    def updateDuration(val):
+        """
+            updateDuration - Updates the duration of playback
+
+            Parameters
+                val - Value returned by slider which called the function
+
+            Returns
+                None
+        """
+
+        global DURATION
+
+        DURATION = sliders[0]["duration"].val
+
+    def updateWavelengths(val):
+        """
+            updateWavelengths - Updates the number of visible wavelengths
+
+            Parameters
+                val - Value returned by slider which called the function
+
+            Returns
+                None
+        """
+
+        nonlocal OSC1
+        nonlocal OSC2
+        nonlocal wavelengths
+
+        wavelengths = sliders[0]["wavelengths"].val
         plotWaveforms(False, OSC1freq, OSC2freq)
 
     def plotWaveforms(init, OSC1freq, OSC2freq):
@@ -320,6 +370,7 @@ def Draw(waveforms):
 
         nonlocal OSC1
         nonlocal OSC2
+        nonlocal wavelengths
 
         if init:
             for row in range(1,ROWS):
@@ -366,6 +417,26 @@ def Draw(waveforms):
                 if row == 0:
                     if col < 2: axes[row,col] = \
                         fig.add_subplot(grid2[row,2*col:2*col+2])
+
+                    elif 2 < col < 6:
+                        axes[row,3] = \
+                            fig.add_subplot(grid3[col-3,3:])
+                        if col == 3:
+                            sliders[row]["volume"] = Slider(axes[row,3], \
+                                "Volume", 0, 1, valinit = VOLUME)
+                            sliders[row]["volume"].valtext.set_visible(False)
+                            sliders[row]["volume"].on_changed(updateVolume)
+                        if col == 4:
+                            sliders[row]["duration"] = Slider(axes[row,3], \
+                                "Duration", 0, 20, valinit = DURATION)
+                            sliders[row]["duration"].valtext.set_visible(False)
+                            sliders[row]["duration"].on_changed(updateDuration)
+                        if col == 5:
+                            sliders[row]["wavelengths"] = Slider(axes[row,3], \
+                                "Wavelengths", 0, 10, valinit = wavelengths, \
+                                closedmin = False)
+                            sliders[row]["wavelengths"].on_changed( \
+                                updateWavelengths)
 
                     if col == 0:
                         sliders[row]["OSC1"] = Slider(axes[row,col], \
@@ -417,7 +488,7 @@ def Draw(waveforms):
                 linewidth=1, zorder=0)
 
     # assign buttons their functions
-    assignButtons(volume, sample_rate, duration)
+    assignButtons(sample_rate)
 
 
     # remove space between plots
