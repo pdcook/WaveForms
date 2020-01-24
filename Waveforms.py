@@ -2,6 +2,7 @@ import numpy as np
 import pyaudio
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button, RadioButtons
+from functools import partial
 
 LEFT = 0.05
 RIGHT = 0.95
@@ -28,13 +29,21 @@ class WaveForm:
                 Feq - The equation of the nth term of the Fourier series of the
                         waveform
 
+                waveform - The waveform of a single wavelength as a Numpy array
+
+                ignoreFreq - Boolean to determine if the frequency sliders
+                                should be ignored (used for white noise)
+
+                ignoreWavelength - Boolean to determine if the wavelength
+                                    slider should be ignored (white noise)
+
                 nmax [76] - highest order term in the Fourier series / the
                         highest harmonic to be used, must be even
 
         Methods
 
         NOTES
-            - At least one of Teq and Feq must be specified.
+            - At least one of Teq, Feq, or waveform must be specified.
             - Teq must be a function of n (index in the series), time, and
                 frequency in the form Teq(n,t,f)
             - Feq must be a function of n (index in the series) and frequency
@@ -45,16 +54,20 @@ class WaveForm:
 
     """
 
-    def __init__(self, name, Teq = None, Feq = None, nmax = 76, **kwargs):
-        self.name   = name
-        self.Teq    = Teq
-        self.Feq    = Feq
-        self.nmax   = nmax
-        self.kwargs = kwargs
+    def __init__(self, name, Teq = None, Feq = None, waveform = None, \
+            ignoreFreq = False, ignoreWavelength = False, nmax = 76, **kwargs):
+        self.name             = name
+        self.Teq              = Teq
+        self.Feq              = Feq
+        self.nmax             = nmax
+        self.waveform         = waveform
+        self.ignoreFreq       = ignoreFreq
+        self.ignoreWavelength = ignoreWavelength
+        self.kwargs           = kwargs
 
-        if Teq is None and Feq is None:
-            raise RuntimeError("At least one of Teq and Feq must be specified \
-for WaveForm: %s" %name)
+        if Teq is None and Feq and waveform is None:
+            raise RuntimeError("At least one of Teq, Feq, or waveform must be \
+specified for WaveForm: %s" %name)
 
         if nmax % 2 != 0:
             raise RuntimeError("nmax must be even for WaveForm: %s" %name)
@@ -79,6 +92,9 @@ for WaveForm: %s" %name)
         """
 
         if duration is None: duration = 1/freq
+
+        # if the waveform has been provided, just return it
+        if self.waveform is not None: return self.waveform
 
         # generate the waveform by summing terms in Teq
         waveform = np.sum(self.Teq( \
@@ -109,6 +125,19 @@ for WaveForm: %s" %name)
 
         PlayWave(self.getWaveform(volume, sample_rate, duration, freq), \
             volume, sample_rate, duration, freq)
+
+    def playButton(self, event, volume, sample_rate, duration, freq):
+        """
+            playButton - Translates a button press to playWave
+
+            Parameters
+                event - the event that triggered the button via Matplotlib
+
+            Returns
+                None
+        """
+
+        self.playWave(volume, sample_rate, duration, freq)
 
 
 
@@ -171,8 +200,10 @@ def Draw(waveforms):
             None
     """
 
+    volume = 0.5
     sample_rate = 44100
     freq = 440
+    duration = 10
     wavelengths = 3
 
     try:
@@ -193,64 +224,113 @@ def Draw(waveforms):
 
     # plot all waveforms before formatting
     for row in range(1,ROWS):
-        axes[row, 0].plot(waveforms[row-1].getWaveform(1, sample_rate, wavelengths/freq, freq))
+        axes[row, 0].plot(waveforms[row-1].getWaveform(1, sample_rate, \
+                            wavelengths/freq, freq))
+        axes[row, 1].plot(waveforms[row-1].getWaveform(1, sample_rate, \
+                            wavelengths/freq, freq))
 
-    sliders = np.empty(ROWS+1, dtype=object)
-    buttons = np.empty(ROWS+1, dtype=object)
+    sliders      = np.empty(ROWS+1, dtype = object)
+    buttons      = np.empty(ROWS+1, dtype = object)
     for i in range(ROWS+1):
         sliders[i] = {}
         buttons[i] = {}
 
-    axes = np.pad(axes,((0,0),(0,COLS+2)), mode='constant', constant_values=None)
+    axes = np.pad(axes,((0,0),(0,COLS+2)), \
+            mode='constant', constant_values=None)
+
+    def assignButtons(volume, sample_rate, duration):
+        """
+            assignButtons - Assigns all 'Play' buttons their functions
+
+            Parameters
+                volume - The global volume [0.0, 1.0]
+
+                sample_rate - The global sample_rate in Hz
+
+                duration - The duration of played waveforms in seconds
+
+            Returns
+                None
+        """
+
+        for row, button in enumerate(buttons):
+            if button == {}: continue   # skip empty row
+            button = button["Play"]     # only modify the 'Play' button
+
+            if row < ROWS:
+                button.on_clicked(partial(waveforms[row-1].playButton,volume=volume, sample_rate=sample_rate, duration=duration, freq=freq))
 
     # remove ticks from all plots and add sliders
     for row,ax in enumerate(axes):
         for col,a in enumerate(ax):
             if col >= COLS or row == 0:
+
                 try: a.set_visible(False)
+
                 except: pass
 
                 # add oscilator 1 and 2 freq. level
                 if row == 0:
-                    if col < 2: axes[row,col] = fig.add_subplot(grid2[row,2*col:2*col+2])
+                    if col < 2: axes[row,col] = \
+                        fig.add_subplot(grid2[row,2*col:2*col+2])
+
                     if col == 0: sliders[row]["OSC1"] = Slider(axes[row,col], \
-                        "OSC1\nFreq.", 8.18, 12500, valinit=440)
-                    elif col == 1: sliders[row]["OSC2"] = Slider(axes[row,col], \
-                        "OSC2\nFreq.", 8.18, 12500, valinit=440)
+                        "OSC1\nFreq.", 16.351597, 4186.009045, valinit=440)
+
+                    elif col == 1: sliders[row]["OSC2"] = \
+                        Slider(axes[row,col], \
+                        "OSC2\nFreq.", 16.351597, 4186.009045, valinit=440)
 
                 # add play and reset buttons, and mixing sliders
                 else:
                     if col == 2*COLS+2 and row < ROWS:
                         axes[row,col] = fig.add_subplot(grid2[row,col])
-                        sliders[row]["OSC1"] = Slider(axes[row,col], "OSC1\nLevel", 0, 10, valinit=5)
+                        sliders[row]["OSC1"] = Slider(axes[row,col], \
+                            "OSC1\nLevel", 0, 10, valinit=0)
+
                     elif col == 2*COLS+3 and row < ROWS:
                         axes[row,col] = fig.add_subplot(grid2[row,col])
-                        sliders[row]["OSC2"] = Slider(axes[row,col], "OSC2\nLevel", 0, 10, valinit=5)
+                        sliders[row]["OSC2"] = Slider(axes[row,col], \
+                            "OSC2\nLevel", 0, 10, valinit=0)
+
                     elif col == 2*COLS:
                         axes[row,col] = fig.add_subplot(grid2[row,col])
                         buttons[row]["Play"] = Button(axes[row,col], "Play")
+
                     elif col == 2*COLS+1:
                         axes[row,col] = fig.add_subplot(grid2[row,col])
-                        buttons[row]["Reset"] =Button(axes[row,col], "Reset")
+                        buttons[row]["Reset"] = Button(axes[row,col], "Reset")
+
                 continue
+
             elif a is None: pass
+
             try:
                 a.set_xticklabels([])
                 a.set_yticklabels([])
                 a.set_xticks([])
                 a.set_yticks([])
                 a.set_xlim(a.get_xlim())
+                a.set_ylim([-1.2,1.2])
                 a.plot([a.get_xlim()[0], a.get_xlim()[~0]],[0,0], \
-                    linestyle = "solid", color = "darkgrey", linewidth=1, zorder=0)
+                    linestyle = "solid", color = "darkgrey", \
+                    linewidth=1, zorder=0)
+
             except: pass
+
+    # assign buttons their functions
+    assignButtons(volume, sample_rate, duration)
 
 
     # remove space between plots
-    plt.subplots_adjust(left = LEFT, right = RIGHT, bottom = BOTTOM, top = TOP, \
-                            wspace=0, hspace=0)
-
+    plt.subplots_adjust(left = LEFT, right = RIGHT, bottom = BOTTOM, \
+                        top = TOP, wspace=0, hspace=0)
 
     plt.show()
+
+# =========================================================================== #
+#                             W A V E F O R M S                               #
+# =========================================================================== #
 
 # Triangle WaveForm
 def Triangle_Teq(n,t,f):
@@ -261,7 +341,8 @@ Triangle = WaveForm("Triangle", Triangle_Teq)
 # Pulse WaveForm (example of **kwargs)
 def Pulse_Teq(n, t, f, **kwargs):
     d = kwargs["duty"]  # percent duty cycle of the pulse
-    return 2*np.sin(n*np.pi*d/100.)*np.cos(n*2*np.pi*f*(t-(d/(100.*f))/2))/(n*np.pi)
+    return 2*np.sin(n*np.pi*d/100.)* \
+        np.cos(n*2*np.pi*f*(t-(d/(100.*f))/2))/(n*np.pi)
 
 Pulse = WaveForm("Pulse", Pulse_Teq, duty = 10)
 
@@ -277,13 +358,25 @@ def Sine_Teq(n, t, f):
 
 Sine = WaveForm("Sine", Sine_Teq)
 
-WAVEFORMS = [Triangle, Pulse, Square, Sine]
+# Saw WaveForm
+def Saw_Teq(n, t, f):
+    return -2*np.sin(n*2*np.pi*f*(t-1/(2*f)))/(n*np.pi)
 
-#Triangle.playWave(duration = 2)
-#Pulse.playWave(duration = 2)
-#Square.playWave(duration = 2)
-#Sine.playWave(duration = 2)
+Saw = WaveForm("Saw", Saw_Teq)
 
+# WhiteNoise WaveForm
+WhiteNoise_waveform = np.clip(0.35*np.random.randn(44100),-1,1)
+
+WhiteNoise = WaveForm("White Noise", waveform = WhiteNoise_waveform, \
+    ignoreWavelength = True)
+
+
+# put WaveForms in order
+WAVEFORMS = [Sine, Triangle, Pulse, Saw, WhiteNoise]
+
+# =========================================================================== #
+
+# draw the window
 Draw(WAVEFORMS)
 
 # end PyAudio
