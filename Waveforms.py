@@ -3,6 +3,7 @@ import pyaudio
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button
 import matplotlib.animation as animation
+import threading
 
 """
     TODO
@@ -30,6 +31,7 @@ OSC2freq = 440
 
 DURATION = 10
 VOLUME = 0.5
+WAVELENGTHS = 5
 WAVELENGTHS_MIN = 0
 WAVELENGTHS_MAX = 10
 
@@ -178,8 +180,12 @@ supported.")
                 None
         """
 
-        PlayWave(self.getWaveform(volume, sample_rate, duration, None, freq), \
-            volume, sample_rate, duration, freq)
+        # opens PlayWave in a separate thread so UI stays responsive
+        t = threading.Thread( target = PlayWave, args = \
+            [self.getWaveform(volume, sample_rate, duration, None, freq), \
+            volume, sample_rate, duration, freq])
+
+        t.start()
 
     def playButton(self, event):
         """
@@ -257,8 +263,6 @@ def Draw(waveforms):
 
     global OSC1freq
     global OSC2freq
-
-    wavelengths = 5
 
     try:
         ROWS = waveforms.size + 1
@@ -377,9 +381,9 @@ def Draw(waveforms):
 
         nonlocal OSC1
         nonlocal OSC2
-        nonlocal wavelengths
+        global WAVELENGTHS
 
-        wavelengths = sliders[0]["wavelengths"].val
+        WAVELENGTHS = sliders[0]["wavelengths"].val
         plotWaveforms(False, OSC1freq, OSC2freq)
 
     def updateSampleRate(val):
@@ -415,17 +419,16 @@ def Draw(waveforms):
 
         nonlocal OSC1
         nonlocal OSC2
-        nonlocal wavelengths
 
         for row in range(1,ROWS):
 
             if init:
                 OSC1[row], = axes[row, 0].plot(waveforms[row-1].getWaveform(1,\
-                                    SAMPLE_RATE, wavelengths/OSC1freq, \
-                                    wavelengths, OSC1freq))
+                                    SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
+                                    WAVELENGTHS, OSC1freq))
                 OSC2[row], = axes[row, 1].plot(waveforms[row-1].getWaveform(1,\
-                                    SAMPLE_RATE, wavelengths/OSC1freq, \
-                                    wavelengths, OSC2freq))
+                                    SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
+                                    WAVELENGTHS, OSC2freq))
                 # the use of OSC1freq in the calculation for the duration of
                 #   OSC2 in the line above may appear to be a mistake, but it
                 #   is deliberate in order for the difference in freq. between
@@ -435,45 +438,45 @@ def Draw(waveforms):
                 if waveforms[row-1].animated:
                     OSC1_meta_func = \
 """
-def OSC1_animation(frame, axes, waveforms, OSC1, interval, wavelengths):
+def OSC1_animation_%d(frame, axes, waveforms, OSC1, interval):
 
     t_size = int(np.round(SAMPLE_RATE*interval))
 
     t = np.linspace(frame*interval, (frame+1)*interval, t_size)
 
-    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, wavelengths/OSC1freq, wavelengths, OSC1freq)
+    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, WAVELENGTHS/OSC1freq, WAVELENGTHS, OSC1freq)
 
-    size = int(np.round(SAMPLE_RATE/OSC1freq * wavelengths))
+    size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
     xdata = np.arange(waveform_[:size].size)
     OSC1[%d].set_data(xdata, waveform_[:size])
     axes[%d,0].set_xlim([0,waveform_[:size].size-1])
     return OSC1,
-"""%(row-1,row,row)
+"""%(row,row-1,row,row)
                     exec(OSC1_meta_func, globals())
 
-                    interval = wavelengths / OSC1freq
-                    waveforms[row-1].animations["OSC1"] = animation.FuncAnimation(fig, OSC1_animation, interval=interval, fargs=(axes, waveforms, OSC1, interval, wavelengths))
+                    interval = WAVELENGTHS / OSC1freq
+                    exec('waveforms[row-1].animations["OSC1"] = animation.FuncAnimation(fig, OSC1_animation_%d, interval=interval, fargs=(axes, waveforms, OSC1, interval))' %(row))
 
                     OSC2_meta_func = \
 """
-def OSC2_animation(frame, axes, waveforms, OSC2, interval, wavelengths):
+def OSC2_animation_%d(frame, axes, waveforms, OSC2, interval):
 
     t_size = int(np.round(SAMPLE_RATE*interval))
 
     t = np.linspace(frame*interval, (frame+1)*interval, t_size)
 
-    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, wavelengths/OSC1freq, wavelengths, OSC2freq)
+    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, WAVELENGTHS/OSC1freq, WAVELENGTHS, OSC2freq)
 
-    size = int(np.round(SAMPLE_RATE/OSC1freq * wavelengths))
+    size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
     xdata = np.arange(waveform_[:size].size)
     OSC2[%d].set_data(xdata, waveform_[:size])
     axes[%d,1].set_xlim([0,waveform_[:size].size-1])
     return OSC2,
-"""%(row-1,row,row)
+"""%(row,row-1,row,row)
                     exec(OSC2_meta_func, globals())
 
-                    interval = wavelengths / OSC1freq
-                    waveforms[row-1].animations["OSC2"] = animation.FuncAnimation(fig, OSC2_animation, interval=interval, fargs=(axes, waveforms, OSC2, interval, wavelengths))
+                    interval = WAVELENGTHS / OSC1freq
+                    exec('waveforms[row-1].animations["OSC2"] = animation.FuncAnimation(fig, OSC2_animation_%d, interval=interval, fargs=(axes, waveforms, OSC2, interval))' %(row))
 
 
             else:
@@ -482,19 +485,19 @@ def OSC2_animation(frame, axes, waveforms, OSC2, interval, wavelengths):
                 if waveforms[row-1].animated: continue
 
                 waveform_ = waveforms[row-1].getWaveform(1, \
-                                SAMPLE_RATE, wavelengths/OSC1freq, \
-                                wavelengths, OSC1freq)
+                                SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
+                                WAVELENGTHS, OSC1freq)
 
-                size = int(np.round(SAMPLE_RATE/OSC1freq * wavelengths))
+                size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
                 xdata = np.arange(waveform_[:size].size)
                 OSC1[row].set_data(xdata, waveform_[:size])
                 axes[row,0].set_xlim([0,waveform_[:size].size-1])
 
                 waveform_ = waveforms[row-1].getWaveform(1, \
-                                SAMPLE_RATE, wavelengths/OSC1freq, \
-                                wavelengths, OSC2freq)
+                                SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
+                                WAVELENGTHS, OSC2freq)
 
-                size = int(np.round(SAMPLE_RATE/OSC1freq * wavelengths))
+                size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
                 xdata = np.arange(waveform_[:size].size)
                 OSC2[row].set_data(xdata, waveform_[:size])
                 axes[row,1].set_xlim([0,waveform_[:size].size-1])
@@ -532,7 +535,7 @@ def OSC2_animation(frame, axes, waveforms, OSC2, interval, wavelengths):
                             sliders[row]["wavelengths"] = \
                                 Slider(axes[row,col], \
                                 "Wavelengths", WAVELENGTHS_MIN, \
-                                WAVELENGTHS_MAX, valinit = wavelengths, \
+                                WAVELENGTHS_MAX, valinit = WAVELENGTHS, \
                                 closedmin = False)
                             sliders[row]["wavelengths"].on_changed( \
                                 updateWavelengths)
@@ -633,7 +636,7 @@ def Pulse_Weq(t, f, **kwargs):
 
     return ((Saw_Weq(t,f) > LFO).astype(int)).astype(float)
 
-Pulse = WaveForm("Pulse", Weq=Pulse_Weq, LFOfreq = 1)
+Pulse = WaveForm("Pulse", Weq=Pulse_Weq, LFOfreq = 1, animated = True)
 
 # Square WaveForm
 def Square_Teq(n, t, f):
