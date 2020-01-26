@@ -1,7 +1,8 @@
 import numpy as np
 import pyaudio
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider, Button, RadioButtons
+from matplotlib.widgets import Slider, Button
+import matplotlib.animation as animation
 
 """
     TODO
@@ -33,7 +34,6 @@ WAVELENGTHS_MIN = 0
 WAVELENGTHS_MAX = 10
 
 SAMPLE_RATE = 44100
-
 
 COLS = 3
 
@@ -105,6 +105,9 @@ must be specified for WaveForm: %s" %name)
 
         if nmax % 2 != 0:
             raise RuntimeError("nmax must be even for WaveForm: %s" %name)
+
+        # create the animations dict if the plot is to be animated
+        if self.animated: self.animations = {}
 
     def getWaveform(self, volume = 0.5, sample_rate = 44100, \
         duration = None, wavelengths = 1, freq = 440):
@@ -414,8 +417,9 @@ def Draw(waveforms):
         nonlocal OSC2
         nonlocal wavelengths
 
-        if init:
-            for row in range(1,ROWS):
+        for row in range(1,ROWS):
+
+            if init:
                 OSC1[row], = axes[row, 0].plot(waveforms[row-1].getWaveform(1,\
                                     SAMPLE_RATE, wavelengths/OSC1freq, \
                                     wavelengths, OSC1freq))
@@ -427,8 +431,56 @@ def Draw(waveforms):
                 #   is deliberate in order for the difference in freq. between
                 #   OSC1 and OSC2 to be shown
 
-        else:
-            for row in range(1,ROWS):
+                # set up animated plot if necessary
+                if waveforms[row-1].animated:
+                    OSC1_meta_func = \
+"""
+def OSC1_animation(frame, axes, waveforms, OSC1, interval, wavelengths):
+
+    t_size = int(np.round(SAMPLE_RATE*interval))
+
+    t = np.linspace(frame*interval, (frame+1)*interval, t_size)
+
+    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, wavelengths/OSC1freq, wavelengths, OSC1freq)
+
+    size = int(np.round(SAMPLE_RATE/OSC1freq * wavelengths))
+    xdata = np.arange(waveform_[:size].size)
+    OSC1[%d].set_data(xdata, waveform_[:size])
+    axes[%d,0].set_xlim([0,waveform_[:size].size-1])
+    return OSC1,
+"""%(row-1,row,row)
+                    exec(OSC1_meta_func, globals())
+
+                    interval = wavelengths / OSC1freq
+                    waveforms[row-1].animations["OSC1"] = animation.FuncAnimation(fig, OSC1_animation, interval=interval, fargs=(axes, waveforms, OSC1, interval, wavelengths))
+
+                    OSC2_meta_func = \
+"""
+def OSC2_animation(frame, axes, waveforms, OSC2, interval, wavelengths):
+
+    t_size = int(np.round(SAMPLE_RATE*interval))
+
+    t = np.linspace(frame*interval, (frame+1)*interval, t_size)
+
+    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, wavelengths/OSC1freq, wavelengths, OSC2freq)
+
+    size = int(np.round(SAMPLE_RATE/OSC1freq * wavelengths))
+    xdata = np.arange(waveform_[:size].size)
+    OSC2[%d].set_data(xdata, waveform_[:size])
+    axes[%d,1].set_xlim([0,waveform_[:size].size-1])
+    return OSC2,
+"""%(row-1,row,row)
+                    exec(OSC2_meta_func, globals())
+
+                    interval = wavelengths / OSC1freq
+                    waveforms[row-1].animations["OSC2"] = animation.FuncAnimation(fig, OSC2_animation, interval=interval, fargs=(axes, waveforms, OSC2, interval, wavelengths))
+
+
+            else:
+                # if the plot is animated it doesn't need to be updated, just
+                #    needs to be plotted once
+                if waveforms[row-1].animated: continue
+
                 waveform_ = waveforms[row-1].getWaveform(1, \
                                 SAMPLE_RATE, wavelengths/OSC1freq, \
                                 wavelengths, OSC1freq)
@@ -613,7 +665,7 @@ def WhiteNoise_Weq(t, f, **kwargs):
     else: return np.clip(sigma*np.random.randn(t.size),-1,1)
 
 WhiteNoise = WaveForm("White Noise", Weq=WhiteNoise_Weq, \
-    ignoreWavelength = True, sigma = 0.35)
+    ignoreWavelength = True, animated = True, sigma = 0.35)
 
 
 # put WaveForms in order
