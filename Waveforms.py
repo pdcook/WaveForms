@@ -10,7 +10,7 @@ import threading
 
     [X] - Re-do everything in terms of single wavelengths, make waveforms exact, add option for special function to playWave (for noise and pulse)
     [X] - Allow animations for arbitrary waveforms in order for Pulse and WhiteNoise to work
-    [ ] - Add LFO frequency bars for Pulse duty cycle (add ability for arbitrary extra parameter vertical sliders (default min/max to 0 to 1 and let the user deal with it)
+    [X] - Add LFO frequency bars for Pulse duty cycle (add ability for arbitrary extra parameter vertical sliders (default min/max to 0 to 1 and let the user deal with it)
     [ ] - Add reset button functionality
     [X] - Add frequency slider functionality
     [X] - Add global volume/duration/wavelength view sliders
@@ -573,7 +573,9 @@ fargs=(axes, waveforms, OSC2, interval))' %(row))
 
                         if osc_ != col+1: continue
 
-                        ax_ = fig.add_subplot(grid5[row,12*(col+1)-1])
+                        slider_num += 1
+
+                        ax_ = fig.add_subplot(grid5[row,12*(col+1)-slider_num])
                         SLIDERS[row][param] = Slider(ax_, "", min_, max_, \
                                         valinit=init_, orientation='vertical')
                         SLIDERS[row][param].valtext.set_visible(False)
@@ -587,7 +589,8 @@ def update_%d(val):
 """%(row*ROWS+col, row-1, param, row, param)
 
                         exec(meta_func,globals())
-                        exec("SLIDERS[%d]['%s'].on_changed(update_%d)" %(row,param,row*ROWS+col))
+                        exec("SLIDERS[%d]['%s'].on_changed(update_%d)" \
+                                %(row,param,row*ROWS+col))
 
             # check if this is a space where a plot isn't supposed to be
             if col >= COLS or row == 0:
