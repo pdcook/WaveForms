@@ -6,6 +6,7 @@ from matplotlib.widgets import Slider, Button, RadioButtons
 """
     TODO
 
+    [ ] - Re-do everything in terms of single wavelengths, make waveforms exact, add option for special function to playWave (for noise and pulse)
     [ ] - Allow animations for arbitrary waveforms in order for Pulse and WhiteNoise to work
     [ ] - Add LFO frequency bars for Pulse duty cycle (add ability for arbitrary extra parameter vertical sliders (default min/max to 0 to 1 and let the user deal with it)
         |
@@ -16,7 +17,8 @@ from matplotlib.widgets import Slider, Button, RadioButtons
     [ ] - Add reset button functionality
     [X] - Add frequency slider functionality
     [X] - Add global volume/duration/wavelength view sliders
-    [ ] - Clean up global sample_rate variable, allow user to set it in the code
+    [X] - Clean up global sample_rate variable, allow user to set it in the code
+    [ ] - Add rectification button on each WaveForm
     [ ] - Add mixer
     [ ] - Fourier transforms
 
