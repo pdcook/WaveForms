@@ -6,14 +6,9 @@ from matplotlib.widgets import Slider, Button, RadioButtons
 """
     TODO
 
-    [ ] - Re-do everything in terms of single wavelengths, make waveforms exact, add option for special function to playWave (for noise and pulse)
+    [X] - Re-do everything in terms of single wavelengths, make waveforms exact, add option for special function to playWave (for noise and pulse)
     [ ] - Allow animations for arbitrary waveforms in order for Pulse and WhiteNoise to work
     [ ] - Add LFO frequency bars for Pulse duty cycle (add ability for arbitrary extra parameter vertical sliders (default min/max to 0 to 1 and let the user deal with it)
-        |
-        |   No idea how to do these two because I don't understand the LFO sweeping the duty cycle...
-        |   If the LFO and the audio sample are at the same sample rate, then one full wavelength of a pulse with a given duty cycle will never exist
-        |   How is this actually generated?
-
     [ ] - Add reset button functionality
     [X] - Add frequency slider functionality
     [X] - Add global volume/duration/wavelength view sliders
@@ -59,6 +54,8 @@ class WaveForm:
                 Feq - The equation of the nth term of the Fourier series of the
                         waveform
 
+                Weq - A function which returns a the waveform as an array
+
                 waveform - The waveform of a single wavelength as a Numpy array
 
                 ignoreFreq - Boolean to determine if the frequency sliders
@@ -67,37 +64,44 @@ class WaveForm:
                 ignoreWavelength - Boolean to determine if the wavelength
                                     slider should be ignored (white noise)
 
+                animated [False] - Boolean to determine if the plot is animated
+
                 nmax [76] - highest order term in the Fourier series / the
                         highest harmonic to be used, must be even
 
         Methods
 
         NOTES
-            - At least one of Teq, Feq, or waveform must be specified.
+            - At least one of Teq, Feq, Weq, or waveform must be specified.
             - Teq must be a function of n (index in the series), time, and
                 frequency in the form Teq(n,t,f)
             - Feq must be a function of n (index in the series) and frequency
                 in the form Feq(n,f)
+            - Weq must be a function of t (time) and f (frequency) and in the
+                form Weq(t,f,s)
             - Extra arguments (such as pulse widths) required by either Teq or
                 Feq may be specified by **kwargs in both the equation's
                 function and the WaveForm initialization. Example included.
 
     """
 
-    def __init__(self, name, Teq = None, Feq = None, waveform = None, \
-            ignoreFreq = False, ignoreWavelength = False, nmax = 76, **kwargs):
+    def __init__(self, name, Teq = None, Feq = None, Weq = None, \
+            waveform = None, ignoreFreq = False, ignoreWavelength = False, \
+            animated = False, nmax = 76, **kwargs):
         self.name             = name
         self.Teq              = Teq
         self.Feq              = Feq
+        self.Weq              = Weq
         self.nmax             = nmax
         self.waveform         = waveform
         self.ignoreFreq       = ignoreFreq
         self.ignoreWavelength = ignoreWavelength
+        self.animated         = animated
         self.kwargs           = kwargs
 
-        if Teq is None and Feq and waveform is None:
-            raise RuntimeError("At least one of Teq, Feq, or waveform must be \
-specified for WaveForm: %s" %name)
+        if Teq is None and Feq and Weq and waveform is None:
+            raise RuntimeError("At least one of Teq, Feq, Weq, or waveform \
+must be specified for WaveForm: %s" %name)
 
         if nmax % 2 != 0:
             raise RuntimeError("nmax must be even for WaveForm: %s" %name)
@@ -124,6 +128,7 @@ specified for WaveForm: %s" %name)
         """
 
         if duration is None: duration = wavelengths/freq
+        else: wavelengths = int(np.ceil(duration * freq))
 
         # if the waveform has been provided, just return it
         if self.waveform is not None and wavelengths is not None and \
@@ -134,10 +139,20 @@ specified for WaveForm: %s" %name)
         elif self.waveform is not None: return self.waveform
 
         # generate the waveform by summing terms in Teq
-        waveform = np.sum(self.Teq( \
-            np.arange(1,int(self.nmax/2+1))[:,np.newaxis], \
-            np.linspace(0, duration, int(round(duration*sample_rate))), freq,
-            **self.kwargs), axis = 0)
+        if self.Teq is not None:
+            waveform = np.sum(self.Teq( \
+                np.arange(1,int(self.nmax/2+1))[:,np.newaxis], \
+                np.linspace(0, duration, int(round(duration*sample_rate))), \
+                freq, **self.kwargs), axis = 0)
+
+        elif self.Feq is not None:
+            raise RuntimeError("Generating waveforms from Feq not yet \
+supported.")
+
+        elif self.Weq is not None:
+            waveform = self.Weq(np.linspace(0, duration, \
+                        int(round(duration*sample_rate))), freq, \
+                        **self.kwargs)
 
         return waveform
 
@@ -417,16 +432,20 @@ def Draw(waveforms):
                 waveform_ = waveforms[row-1].getWaveform(1, \
                                 SAMPLE_RATE, wavelengths/OSC1freq, \
                                 wavelengths, OSC1freq)
-                xdata = np.arange(waveform_.size)
-                OSC1[row].set_data(xdata, waveform_)
-                axes[row,0].set_xlim([0,waveform_.size-1])
+
+                size = int(np.round(SAMPLE_RATE/OSC1freq * wavelengths))
+                xdata = np.arange(waveform_[:size].size)
+                OSC1[row].set_data(xdata, waveform_[:size])
+                axes[row,0].set_xlim([0,waveform_[:size].size-1])
 
                 waveform_ = waveforms[row-1].getWaveform(1, \
                                 SAMPLE_RATE, wavelengths/OSC1freq, \
                                 wavelengths, OSC2freq)
-                xdata = np.arange(waveform_.size)
-                OSC2[row].set_data(xdata, waveform_[:xdata.size])
-                axes[row,1].set_xlim([0,waveform_.size-1])
+
+                size = int(np.round(SAMPLE_RATE/OSC1freq * wavelengths))
+                xdata = np.arange(waveform_[:size].size)
+                OSC2[row].set_data(xdata, waveform_[:size])
+                axes[row,1].set_xlim([0,waveform_[:size].size-1])
 
             fig.canvas.draw_idle()
 
@@ -544,16 +563,25 @@ def Draw(waveforms):
 # Triangle WaveForm
 def Triangle_Teq(n,t,f):
     return 8*(-(-1)**n)*np.sin((2*n-1)*2*np.pi*f*t)/((2*n-1)*np.pi)**2
+def Triangle_Weq(t,f):
+    return 2*np.abs(2*(t*f-np.floor(t*f+0.5)))-1
 
-Triangle = WaveForm("Triangle", Triangle_Teq)
+Triangle = WaveForm("Triangle", Weq=Triangle_Weq)
 
 # Pulse WaveForm (example of **kwargs)
 def Pulse_Teq(n, t, f, **kwargs):
     d = kwargs["duty"]  # percent duty cycle of the pulse
     return 2*np.sin(n*np.pi*d/100.)* \
         np.cos(n*2*np.pi*f*(t-(d/(100.*f))/2))/(n*np.pi)
+def Pulse_Weq(t, f, **kwargs):
+    LFOfreq = kwargs["LFOfreq"]
+    LFO = Triangle_Weq(t,LFOfreq)
+    if np.min(LFO) < 0: LFO -= np.min(LFO)
+    LFO /= np.max(np.abs(LFO))
 
-Pulse = WaveForm("Pulse", Pulse_Teq, duty = 10)
+    return ((Saw_Weq(t,f) > LFO).astype(int)).astype(float)
+
+Pulse = WaveForm("Pulse", Weq=Pulse_Weq, LFOfreq = 1)
 
 # Square WaveForm
 def Square_Teq(n, t, f):
@@ -564,20 +592,28 @@ Square = WaveForm("Square", Square_Teq)
 # Sine WaveForm
 def Sine_Teq(n, t, f):
     return (n==1).astype(int)*np.sin(2*np.pi*f*t)
+def Sine_Weq(t,f):
+    return np.sin(2*np.pi*f*t)
 
-Sine = WaveForm("Sine", Sine_Teq)
+Sine = WaveForm("Sine", Weq=Sine_Weq)
 
 # Saw WaveForm
 def Saw_Teq(n, t, f):
     return -2*np.sin(n*2*np.pi*f*(t-1/(2*f)))/(n*np.pi)
+def Saw_Weq(t, f):
+    return -(2/np.pi)*np.arctan((1/np.tan(t*np.pi*f)))
 
-Saw = WaveForm("Saw", Saw_Teq)
+Saw = WaveForm("Saw", Weq=Saw_Weq)
 
 # WhiteNoise WaveForm
 WhiteNoise_waveform = np.clip(0.35*np.random.randn(100000),-1,1)
+def WhiteNoise_Weq(t, f, **kwargs):
+    sigma = kwargs["sigma"] # standard deviation of distribution, uniform if 0
+    if sigma <= 0: return np.random.uniform(-1,1,t.size)
+    else: return np.clip(sigma*np.random.randn(t.size),-1,1)
 
-WhiteNoise = WaveForm("White Noise", waveform = WhiteNoise_waveform, \
-    ignoreWavelength = True)
+WhiteNoise = WaveForm("White Noise", Weq=WhiteNoise_Weq, \
+    ignoreWavelength = True, sigma = 0.35)
 
 
 # put WaveForms in order
