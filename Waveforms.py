@@ -37,6 +37,10 @@ WAVELENGTHS_MAX = 10    # maximum allowed visible wavelengths
 
 SAMPLE_RATE = 44100     # default sample rate in Hz
 
+SLIDERS   = None
+BUTTONS   = None
+WAVEFORMS = None
+
 COLS = 3    # number of columns in window
 
 # start PyAudio
@@ -69,27 +73,37 @@ class WaveForm:
                 animated [False] - Boolean to determine if the plot is animated
 
                 nmax [76] - highest order term in the Fourier series / the
-                        highest harmonic to be used, must be even
+                                highest harmonic to be used, must be even
+
+                sliders [None] - dictionary of extra parameter sliders in the
+                                    form {key: [OSC, MIN, MAX, INIT]}
 
         Methods
 
         NOTES
             - At least one of Teq, Feq, Weq, or waveform must be specified.
-            - Teq must be a function of n (index in the series), time, and
-                frequency in the form Teq(n,t,f)
-            - Feq must be a function of n (index in the series) and frequency
-                in the form Feq(n,f)
-            - Weq must be a function of t (time) and f (frequency) and in the
-                form Weq(t,f,s)
+            - Teq must be a function of n (index in the series), time,
+                frequency, and the oscillator in the form Teq(n,t,f,OSC)
+            - Feq must be a function of n (index in the series), frequency, and
+                the oscillator in the form Feq(n,f,OSC)
+            - Weq must be a function of t (time), f (frequency), and the
+                oscillator in the form Weq(t,f, OSC)
             - Extra arguments (such as pulse widths) required by either Teq or
                 Feq may be specified by **kwargs in both the equation's
                 function and the WaveForm initialization. Example included.
+            - These extra arguments may be given sliders with the `sliders`
+                dict. Each key must match the corresponding key in `kwargs` and
+                the associated value must be a list of [OSC, MIN, MAX, INIT]:
+                    OSC  - which oscillator this particular slider belongs to
+                    MIN  - minimum value for the slider
+                    MAX  - maximum value for the slider
+                    INIT - initial value for the slider
 
     """
 
     def __init__(self, name, Teq = None, Feq = None, Weq = None, \
             waveform = None, ignoreFreq = False, ignoreWavelength = False, \
-            animated = False, nmax = 76, **kwargs):
+            animated = False, nmax = 76, sliders = None, **kwargs):
         self.name             = name
         self.Teq              = Teq
         self.Feq              = Feq
@@ -99,6 +113,7 @@ class WaveForm:
         self.ignoreFreq       = ignoreFreq
         self.ignoreWavelength = ignoreWavelength
         self.animated         = animated
+        self.sliders          = sliders
         self.kwargs           = kwargs
 
         if Teq is None and Feq and Weq and waveform is None:
@@ -112,7 +127,7 @@ must be specified for WaveForm: %s" %name)
         if self.animated: self.animations = {}
 
     def getWaveform(self, volume = 0.5, sample_rate = 44100, \
-        duration = None, wavelengths = 1, freq = 440, t = None):
+        duration = None, wavelengths = 1, freq = 440, t = None, OSC = 1):
         """
             getWaveform - Returns the waveform in an array
 
@@ -128,12 +143,14 @@ must be specified for WaveForm: %s" %name)
 
                     t [None] - array of times to return the waveform using Weq
 
+                    OSC [1] - which oscillator is making the waveform (1 or 2)
+
             Returns
                 waveform - the time-domain waveform as a Numpy array
         """
 
         # use Weq if t is specified
-        if t is not None: return self.Weq(t, freq, **self.kwargs)
+        if t is not None: return self.Weq(t, freq, OSC, **self.kwargs)
 
         # make sure both duration and wavelengths are defined
         if duration is None: duration = wavelengths/freq
@@ -151,7 +168,7 @@ must be specified for WaveForm: %s" %name)
             waveform = np.sum(self.Teq( \
                 np.arange(1,int(self.nmax/2+1))[:,np.newaxis], \
                 np.linspace(0, duration, int(round(duration*sample_rate))), \
-                freq, **self.kwargs), axis = 0)
+                freq, OSC, **self.kwargs), axis = 0)
 
         # generate waveform by inverse Fourier transform
         elif self.Feq is not None:
@@ -161,7 +178,7 @@ supported.")
         # generate waveform with Weq
         elif self.Weq is not None:
             waveform = self.Weq(np.linspace(0, duration, \
-                        int(round(duration*sample_rate))), freq, \
+                        int(round(duration*sample_rate))), freq, OSC, \
                         **self.kwargs)
 
         return waveform
@@ -187,8 +204,8 @@ supported.")
 
         # open PlayWave in a separate thread so UI stays responsive
         t = threading.Thread(target = PlayWave, args = \
-            [self.getWaveform(volume, sample_rate, duration, None, freq), \
-            volume, sample_rate, duration, freq])
+            [self.getWaveform(volume, sample_rate, duration, None, freq, \
+            OSC=1), volume, sample_rate, duration, freq])
 
         t.start()
 
@@ -268,6 +285,11 @@ def Draw(waveforms):
 
     global OSC1freq
     global OSC2freq
+    global SLIDERS
+    global BUTTONS
+    global WAVEFORMS
+
+    WAVEFORMS = waveforms
 
     try:
         ROWS = waveforms.size + 1
@@ -289,17 +311,19 @@ def Draw(waveforms):
         right = RIGHT, bottom = BOTTOM, top = TOP, wspace=1, hspace=1)
     grid4 = fig.add_gridspec((ROWS+1)*2, (COLS+2)*2, left = LEFT, \
         right = RIGHT, bottom = BOTTOM, top = TOP, wspace=1, hspace=1)
+    grid5 = fig.add_gridspec(ROWS+1, (COLS+2)*12, left = LEFT, \
+        right = RIGHT, bottom = BOTTOM, top = TOP, wspace=0, hspace=0)
 
     # arrays to save the line objects from each oscillator
     OSC1 = np.empty(ROWS, dtype = object)
     OSC2 = np.empty(ROWS, dtype = object)
 
     # arrays to save the slider and button objects
-    sliders      = np.empty(ROWS+1, dtype = object)
-    buttons      = np.empty(ROWS+1, dtype = object)
+    SLIDERS      = np.empty(ROWS+1, dtype = object)
+    BUTTONS      = np.empty(ROWS+1, dtype = object)
     for i in range(ROWS+1):
-        sliders[i] = {}
-        buttons[i] = {}
+        SLIDERS[i] = {}
+        BUTTONS[i] = {}
 
     # add room for the extra objects that require axes (buttons/sliders/etc)
     axes = np.pad(axes,((0,0),(0,COLS+2)), \
@@ -320,7 +344,7 @@ def Draw(waveforms):
                 None
         """
 
-        for row, button in enumerate(buttons):
+        for row, button in enumerate(BUTTONS):
             if button == {}: continue   # skip empty row
             button = button["Play"]     # only modify the 'Play' button
 
@@ -341,8 +365,8 @@ def Draw(waveforms):
         global OSC1freq
         global OSC2freq
 
-        OSC1freq = sliders[0]["OSC1"].val
-        OSC2freq = sliders[0]["OSC2"].val
+        OSC1freq = SLIDERS[0]["OSC1"].val
+        OSC2freq = SLIDERS[0]["OSC2"].val
         plotWaveforms(False, OSC1freq, OSC2freq)
 
     def updateVolume(val):
@@ -358,7 +382,7 @@ def Draw(waveforms):
 
         global VOLUME
 
-        VOLUME = sliders[0]["volume"].val
+        VOLUME = SLIDERS[0]["volume"].val
 
     def updateDuration(val):
         """
@@ -373,7 +397,7 @@ def Draw(waveforms):
 
         global DURATION
 
-        DURATION = sliders[0]["duration"].val
+        DURATION = SLIDERS[0]["duration"].val
 
     def updateWavelengths(val):
         """
@@ -390,7 +414,7 @@ def Draw(waveforms):
         nonlocal OSC2
         global WAVELENGTHS
 
-        WAVELENGTHS = sliders[0]["wavelengths"].val
+        WAVELENGTHS = SLIDERS[0]["wavelengths"].val
         plotWaveforms(False, OSC1freq, OSC2freq)
 
     def updateSampleRate(val):
@@ -406,7 +430,7 @@ def Draw(waveforms):
 
         global SAMPLE_RATE
 
-        SAMPLE_RATE = int(sliders[0]["sample_rate"].val)
+        SAMPLE_RATE = int(SLIDERS[0]["sample_rate"].val)
         plotWaveforms(False, OSC1freq, OSC2freq)
 
     def plotWaveforms(init, OSC1freq, OSC2freq):
@@ -432,10 +456,10 @@ def Draw(waveforms):
             if init:
                 OSC1[row], = axes[row, 0].plot(waveforms[row-1].getWaveform(1,\
                                     SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
-                                    WAVELENGTHS, OSC1freq))
+                                    WAVELENGTHS, OSC1freq, OSC=1))
                 OSC2[row], = axes[row, 1].plot(waveforms[row-1].getWaveform(1,\
                                     SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
-                                    WAVELENGTHS, OSC2freq))
+                                    WAVELENGTHS, OSC2freq, OSC=2))
                 # the use of OSC1freq in the calculation for the duration of
                 #   OSC2 in the line above may appear to be a mistake, but it
                 #   is deliberate in order for the difference in freq. between
@@ -464,7 +488,7 @@ def OSC1_animation_%d(frame, axes, waveforms, OSC1, interval):
     t = np.linspace(frame*interval, (frame+1)*interval, t_size)
 
     waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, WAVELENGTHS/OSC1freq,\
-WAVELENGTHS, OSC1freq, t=t)
+WAVELENGTHS, OSC1freq, t=t, OSC=1)
 
     size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
     xdata = np.arange(waveform_[:size].size)
@@ -489,7 +513,7 @@ def OSC2_animation_%d(frame, axes, waveforms, OSC2, interval):
     t = np.linspace(frame*interval, (frame+1)*interval, t_size)
 
     waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, WAVELENGTHS/OSC1freq,\
-WAVELENGTHS, OSC2freq, t=t)
+WAVELENGTHS, OSC2freq, t=t, OSC=2)
 
     size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
     xdata = np.arange(waveform_[:size].size)
@@ -512,7 +536,7 @@ fargs=(axes, waveforms, OSC2, interval))' %(row))
 
                 waveform_ = waveforms[row-1].getWaveform(1, \
                                 SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
-                                WAVELENGTHS, OSC1freq)
+                                WAVELENGTHS, OSC1freq, OSC=1)
 
                 size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
                 xdata = np.arange(waveform_[:size].size)
@@ -521,7 +545,7 @@ fargs=(axes, waveforms, OSC2, interval))' %(row))
 
                 waveform_ = waveforms[row-1].getWaveform(1, \
                                 SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
-                                WAVELENGTHS, OSC2freq)
+                                WAVELENGTHS, OSC2freq, OSC=2)
 
                 size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
                 xdata = np.arange(waveform_[:size].size)
@@ -537,6 +561,34 @@ fargs=(axes, waveforms, OSC2, interval))' %(row))
     for row,ax in enumerate(axes):
         for col,a in enumerate(ax):
 
+            # check if the WaveForm on this row needs extra sliders
+            if 0 < row < ROWS and col < COLS:
+                if waveforms[row-1].sliders is not None:
+                    slider_num = 0
+                    for param, vals in waveforms[row-1].sliders.items():
+                        osc_  = vals[0]
+                        min_  = vals[1]
+                        max_  = vals[2]
+                        init_ = vals[3]
+
+                        if osc_ != col+1: continue
+
+                        ax_ = fig.add_subplot(grid5[row,12*(col+1)-1])
+                        SLIDERS[row][param] = Slider(ax_, "", min_, max_, \
+                                        valinit=init_, orientation='vertical')
+                        SLIDERS[row][param].valtext.set_visible(False)
+
+                        meta_func = \
+"""
+def update_%d(val):
+
+    WAVEFORMS[%d].kwargs["%s"] = SLIDERS[%d]["%s"].val
+
+"""%(row*ROWS+col, row-1, param, row, param)
+
+                        exec(meta_func,globals())
+                        exec("SLIDERS[%d]['%s'].on_changed(update_%d)" %(row,param,row*ROWS+col))
+
             # check if this is a space where a plot isn't supposed to be
             if col >= COLS or row == 0:
 
@@ -551,32 +603,32 @@ fargs=(axes, waveforms, OSC2, interval))' %(row))
                             fig.add_subplot(grid3[col-3,3:])
 
                         if col == 3:
-                            sliders[row]["volume"] = Slider(axes[row,col], \
+                            SLIDERS[row]["volume"] = Slider(axes[row,col], \
                                 "Volume", 0, 1, valinit = VOLUME)
-                            sliders[row]["volume"].valtext.set_visible(False)
-                            sliders[row]["volume"].on_changed(updateVolume)
+                            SLIDERS[row]["volume"].valtext.set_visible(False)
+                            SLIDERS[row]["volume"].on_changed(updateVolume)
 
                         if col == 4:
-                            sliders[row]["duration"] = Slider(axes[row,col], \
+                            SLIDERS[row]["duration"] = Slider(axes[row,col], \
                                 "Duration", 0, 20, valinit = DURATION)
-                            sliders[row]["duration"].valtext.set_visible(False)
-                            sliders[row]["duration"].on_changed(updateDuration)
+                            SLIDERS[row]["duration"].valtext.set_visible(False)
+                            SLIDERS[row]["duration"].on_changed(updateDuration)
 
                         if col == 5:
-                            sliders[row]["wavelengths"] = \
+                            SLIDERS[row]["wavelengths"] = \
                                 Slider(axes[row,col], \
                                 "Wavelengths", WAVELENGTHS_MIN, \
                                 WAVELENGTHS_MAX, valinit = WAVELENGTHS, \
                                 closedmin = False)
-                            sliders[row]["wavelengths"].on_changed( \
+                            SLIDERS[row]["wavelengths"].on_changed( \
                                 updateWavelengths)
 
                         if col == 6:
-                            sliders[row]["sample_rate"] = \
+                            SLIDERS[row]["sample_rate"] = \
                                 Slider(axes[row,col], "Sample Rate", 20000, \
                                 96000, valfmt = "%d Hz", \
                                 valinit = SAMPLE_RATE, valstep = 100)
-                            sliders[row]["sample_rate"].on_changed( \
+                            SLIDERS[row]["sample_rate"].on_changed( \
                                 updateSampleRate)
 
                     elif col < 2:
@@ -584,36 +636,36 @@ fargs=(axes, waveforms, OSC2, interval))' %(row))
                         fig.add_subplot(grid2[row,2*col:2*col+2])
 
                         if col == 0:
-                            sliders[row]["OSC1"] = Slider(axes[row,col], \
+                            SLIDERS[row]["OSC1"] = Slider(axes[row,col], \
                                 "OSC1\nFreq.", 16.351597, 4186.009045, \
                                 valinit=OSC1freq)
-                            sliders[row]["OSC1"].on_changed(updateFreqs)
+                            SLIDERS[row]["OSC1"].on_changed(updateFreqs)
 
                         elif col == 1:
-                            sliders[row]["OSC2"] = Slider(axes[row,col], \
+                            SLIDERS[row]["OSC2"] = Slider(axes[row,col], \
                                 "OSC2\nFreq.", 16.351597, 4186.009045, \
                                 valinit=OSC2freq)
-                            sliders[row]["OSC2"].on_changed(updateFreqs)
+                            SLIDERS[row]["OSC2"].on_changed(updateFreqs)
 
                 # add play and reset buttons, and mixing sliders
                 else:
                     if col == 2*COLS+2 and row < ROWS:
                         axes[row,col] = fig.add_subplot(grid4[2*row,col:])
-                        sliders[row]["OSC1"] = Slider(axes[row,col], \
+                        SLIDERS[row]["OSC1"] = Slider(axes[row,col], \
                             "OSC1\nLevel", 0, 10, valinit=0)
 
                     elif col == 2*COLS+3 and row < ROWS:
                         axes[row,col] = fig.add_subplot(grid4[2*row+1,col-1:])
-                        sliders[row]["OSC2"] = Slider(axes[row,col], \
+                        SLIDERS[row]["OSC2"] = Slider(axes[row,col], \
                             "OSC2\nLevel", 0, 10, valinit=0)
 
                     elif col == 2*COLS:
                         axes[row,col] = fig.add_subplot(grid2[row,col])
-                        buttons[row]["Play"] = Button(axes[row,col], "Play")
+                        BUTTONS[row]["Play"] = Button(axes[row,col], "Play")
 
                     elif col == 2*COLS+1:
                         axes[row,col] = fig.add_subplot(grid2[row,col])
-                        buttons[row]["Reset"] = Button(axes[row,col], "Reset")
+                        BUTTONS[row]["Reset"] = Button(axes[row,col], "Reset")
 
                 # skip the rest of this loop for a space that isn't a plot
                 continue
@@ -653,9 +705,9 @@ fargs=(axes, waveforms, OSC2, interval))' %(row))
 
 ############################# Triangle WaveForm ###############################
 
-def Triangle_Teq(n,t,f):
+def Triangle_Teq(n,t,f,OSC):
     return 8*(-(-1)**n)*np.sin((2*n-1)*2*np.pi*f*t)/((2*n-1)*np.pi)**2
-def Triangle_Weq(t,f):
+def Triangle_Weq(t,f,OSC):
     return 2*np.abs(2*(t*f-np.floor(t*f+0.5)))-1
 
 Triangle = WaveForm("Triangle", Weq=Triangle_Weq)
@@ -664,19 +716,32 @@ Triangle = WaveForm("Triangle", Weq=Triangle_Weq)
 
 ################### Pulse WaveForm (example of **kwargs) ######################
 
-def Pulse_Teq(n, t, f, **kwargs):
+def Pulse_Teq(n, t, f, OSC, **kwargs):
     d = kwargs["duty"]  # percent duty cycle of the pulse
     return 2*np.sin(n*np.pi*d/100.)* \
         np.cos(n*2*np.pi*f*(t-(d/(100.*f))/2))/(n*np.pi)
-def Pulse_Weq(t, f, **kwargs):
-    LFOfreq = kwargs["LFOfreq"]
-    LFO = Triangle_Weq(t,LFOfreq)
-    if np.min(LFO) < 0: LFO -= np.min(LFO)
-    LFO /= np.max(np.abs(LFO))
+def Pulse_Weq(t, f, OSC, **kwargs):
+    if OSC == 1: LFOfreq = kwargs["LFO1freq"]
+    if OSC == 2: LFOfreq = kwargs["LFO2freq"]
 
-    return ((Saw_Weq(t,f) > LFO).astype(int)).astype(float)
+    Saw = Saw_Weq(t,f,OSC)
+    Saw -= np.min(Saw)
+    Saw /= np.max(np.abs(Saw))
 
-Pulse = WaveForm("Pulse", Weq=Pulse_Weq, LFOfreq = 1, animated = True)
+    if LFOfreq > 0:
+        LFO = Triangle_Weq(t,LFOfreq,OSC)
+        if np.min(LFO) < 0: LFO -= np.min(LFO)
+        LFO /= np.max(np.abs(LFO))
+
+        return ((Saw > LFO).astype(int)).astype(float)
+
+    # if LFOfreq = 0, just return a 50% pulse (square wave)
+    else: return ((Saw > 0.50).astype(int)).astype(float)
+
+sliders = {"LFO1freq": [1,0,10,1], "LFO2freq": [2,0,10,5]}
+
+Pulse = WaveForm("Pulse", Weq=Pulse_Weq, LFO1freq = 1, LFO2freq = 5, \
+                    animated = True, sliders = sliders)
 
 ###############################################################################
 
@@ -691,10 +756,11 @@ Square = WaveForm("Square", Square_Teq)
 
 ############################### Sine WaveForm #################################
 
-def Sine_Teq(n, t, f):
+def Sine_Teq(n, t, f, OSC):
     return (n==1).astype(int)*np.sin(2*np.pi*f*t)
-def Sine_Weq(t,f):
-    return np.sin(2*np.pi*f*t)
+def Sine_Weq(t,f,OSC):
+    # using -cos to make sure all waveforms are in phase
+    return -np.cos(2*np.pi*f*t)
 
 Sine = WaveForm("Sine", Weq=Sine_Weq)
 
@@ -702,9 +768,9 @@ Sine = WaveForm("Sine", Weq=Sine_Weq)
 
 ############################### Saw WaveForm ##################################
 
-def Saw_Teq(n, t, f):
+def Saw_Teq(n, t, f, OSC):
     return -2*np.sin(n*2*np.pi*f*(t-1/(2*f)))/(n*np.pi)
-def Saw_Weq(t, f):
+def Saw_Weq(t, f, OSC):
     return -(2/np.pi)*np.arctan((1/np.tan(t*np.pi*f)))
 
 Saw = WaveForm("Saw", Weq=Saw_Weq)
@@ -714,13 +780,18 @@ Saw = WaveForm("Saw", Weq=Saw_Weq)
 ################ WhiteNoise WaveForm (example of **kwargs) ####################
 
 WhiteNoise_waveform = np.clip(0.35*np.random.randn(100000),-1,1)
-def WhiteNoise_Weq(t, f, **kwargs):
-    sigma = kwargs["sigma"] # standard deviation of distribution, uniform if 0
+def WhiteNoise_Weq(t, f, OSC, **kwargs):
+    # standard deviation of distribution, uniform if 0
+    if OSC==1: sigma = kwargs["OSC1sigma"]
+    elif OSC==2: sigma = kwargs["OSC2sigma"]
     if sigma <= 0: return np.random.uniform(-1,1,t.size)
     else: return np.clip(sigma*np.random.randn(t.size),-1,1)
 
+sliders = {"OSC1sigma":[1,0,1,0.35], "OSC2sigma":[2,0,1,0.35]}
+
 WhiteNoise = WaveForm("White Noise", Weq=WhiteNoise_Weq, \
-    ignoreWavelength = True, animated = True, sigma = 0.35)
+    ignoreWavelength = True, animated = True, sliders = sliders, \
+    OSC1sigma = 0.35, OSC2sigma = 0.35)
 
 ###############################################################################
 
