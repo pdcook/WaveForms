@@ -112,7 +112,7 @@ must be specified for WaveForm: %s" %name)
         if self.animated: self.animations = {}
 
     def getWaveform(self, volume = 0.5, sample_rate = 44100, \
-        duration = None, wavelengths = 1, freq = 440):
+        duration = None, wavelengths = 1, freq = 440, t = None):
         """
             getWaveform - Returns the waveform in an array
 
@@ -126,11 +126,14 @@ must be specified for WaveForm: %s" %name)
 
                     freq [440] - Frequency the waveform is played at (in Hz)
 
-                    OSC2 - Boolean to determine if this waveform is for OSC2
+                    t [None] - array of times to return the waveform using Weq
 
             Returns
                 waveform - the time-domain waveform as a Numpy array
         """
+
+        # use Weq if t is specified
+        if t is not None: return self.Weq(t, freq, **self.kwargs)
 
         if duration is None: duration = wavelengths/freq
         else: wavelengths = int(np.ceil(duration * freq))
@@ -444,7 +447,7 @@ def OSC1_animation_%d(frame, axes, waveforms, OSC1, interval):
 
     t = np.linspace(frame*interval, (frame+1)*interval, t_size)
 
-    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, WAVELENGTHS/OSC1freq, WAVELENGTHS, OSC1freq)
+    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, WAVELENGTHS/OSC1freq, WAVELENGTHS, OSC1freq, t=t)
 
     size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
     xdata = np.arange(waveform_[:size].size)
@@ -454,7 +457,7 @@ def OSC1_animation_%d(frame, axes, waveforms, OSC1, interval):
 """%(row,row-1,row,row)
                     exec(OSC1_meta_func, globals())
 
-                    interval = WAVELENGTHS / OSC1freq
+                    interval = (WAVELENGTHS / OSC1freq)*1000    # time per frame in milliseconds
                     exec('waveforms[row-1].animations["OSC1"] = animation.FuncAnimation(fig, OSC1_animation_%d, interval=interval, fargs=(axes, waveforms, OSC1, interval))' %(row))
 
                     OSC2_meta_func = \
@@ -465,7 +468,7 @@ def OSC2_animation_%d(frame, axes, waveforms, OSC2, interval):
 
     t = np.linspace(frame*interval, (frame+1)*interval, t_size)
 
-    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, WAVELENGTHS/OSC1freq, WAVELENGTHS, OSC2freq)
+    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, WAVELENGTHS/OSC1freq, WAVELENGTHS, OSC2freq, t=t)
 
     size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
     xdata = np.arange(waveform_[:size].size)
@@ -475,7 +478,7 @@ def OSC2_animation_%d(frame, axes, waveforms, OSC2, interval):
 """%(row,row-1,row,row)
                     exec(OSC2_meta_func, globals())
 
-                    interval = WAVELENGTHS / OSC1freq
+                    interval = (WAVELENGTHS / OSC1freq)*1000    # time per frame in milliseconds
                     exec('waveforms[row-1].animations["OSC2"] = animation.FuncAnimation(fig, OSC2_animation_%d, interval=interval, fargs=(axes, waveforms, OSC2, interval))' %(row))
 
 
