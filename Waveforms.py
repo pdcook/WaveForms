@@ -37,11 +37,16 @@ WAVELENGTHS_MAX = 10    # maximum allowed visible wavelengths
 
 SAMPLE_RATE = 44100     # default sample rate in Hz
 
+FIG       = None
+AXES      = None
+OSC1      = None
+OSC2      = None
 SLIDERS   = None
 BUTTONS   = None
 WAVEFORMS = None
 
 COLS = 3    # number of columns in window
+ROWS = None
 
 # start PyAudio
 pa = pyaudio.PyAudio()
@@ -114,6 +119,8 @@ class WaveForm:
         self.ignoreWavelength = ignoreWavelength
         self.animated         = animated
         self.sliders          = sliders
+        self.OSC1rectify      = False
+        self.OSC2rectify      = False
         self.kwargs           = kwargs
 
         if Teq is None and Feq and Weq and waveform is None:
@@ -150,7 +157,7 @@ must be specified for WaveForm: %s" %name)
         """
 
         # use Weq if t is specified
-        if t is not None: return self.Weq(t, freq, OSC, **self.kwargs)
+        if t is not None: waveform = self.Weq(t, freq, OSC, **self.kwargs)
 
         # make sure both duration and wavelengths are defined
         if duration is None: duration = wavelengths/freq
@@ -159,9 +166,9 @@ must be specified for WaveForm: %s" %name)
         # if the waveform has been provided, just return it
         if self.waveform is not None and wavelengths is not None and \
             self.ignoreWavelength:
-            return self.waveform[:int(SAMPLE_RATE*duration)]
+            waveform = self.waveform[:int(SAMPLE_RATE*duration)]
 
-        elif self.waveform is not None: return self.waveform
+        elif self.waveform is not None: wavefrom = self.waveform
 
         # generate the waveform by summing terms in Teq
         if self.Teq is not None:
@@ -180,6 +187,9 @@ supported.")
             waveform = self.Weq(np.linspace(0, duration, \
                         int(round(duration*sample_rate))), freq, OSC, \
                         **self.kwargs)
+
+        if OSC == 1 and self.OSC1rectify: waveform = np.abs(waveform)
+        if OSC == 2 and self.OSC2rectify: waveform = np.abs(waveform)
 
         return waveform
 
@@ -223,6 +233,32 @@ supported.")
         global OSC1freq
 
         self.playWave(VOLUME, SAMPLE_RATE, DURATION, OSC1freq)
+
+    def updateOSC1Rectification(self, event):
+        """
+            updateOSC1Rectification - Updates the rectification of OSC1
+
+            Parameters
+                event - the event that triggered the button via Matplotlib
+
+            Returns
+                None
+        """
+
+        self.OSC1rectify = not self.OSC1rectify
+
+    def updateOSC2Rectification(self, event):
+        """
+            updateOSC2Rectification - Updates the rectification of OSC1
+
+            Parameters
+                event - the event that triggered the button via Matplotlib
+
+            Returns
+                None
+        """
+
+        self.OSC2rectify = not self.OSC2rectify
 
 def PlayWave(waveform, volume = 0.5, sample_rate = 44100, duration = 20, \
     freq = 440):
@@ -272,6 +308,131 @@ def PlayWave(waveform, volume = 0.5, sample_rate = 44100, duration = 20, \
     stream.stop_stream()
     stream.close()
 
+def plotWaveforms(init, fig, axes, OSC1freq, OSC2freq):
+    """
+        plotWaveforms - Draws the waveforms in the window
+
+        Parameters
+            init - Boolean which should be True if this is the first plot
+
+            fig - The figure to plot on
+
+            axes - Axes of the figure
+
+            OSC1freq - The frequency of OSC1 in hertz
+
+            OSC2freq - The frequency of OSC2 in hertz
+
+        Returns
+            None
+    """
+
+    global OSC1
+    global OSC2
+
+    for row in range(1,ROWS):
+
+        if init:
+            OSC1[row], = axes[row, 0].plot(WAVEFORMS[row-1].getWaveform(1,\
+                                SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
+                                WAVELENGTHS, OSC1freq, OSC=1))
+            OSC2[row], = axes[row, 1].plot(WAVEFORMS[row-1].getWaveform(1,\
+                                SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
+                                WAVELENGTHS, OSC2freq, OSC=2))
+            # the use of OSC1freq in the calculation for the duration of
+            #   OSC2 in the line above may appear to be a mistake, but it
+            #   is deliberate in order for the difference in freq. between
+            #   OSC1 and OSC2 to be shown
+
+            # set up animated plot if necessary
+            #
+            # This is a bit convoluted, but each animated subplot requires
+            #   a unique animation function. I have decided to use
+            #   meta-programming to define these functions. Below, a string
+            #   is formatted with values specific to the row/WaveForm. This
+            #   string is run as Python code with `exec`, then a secondary
+            #   string is run with `exec` which defines and starts the
+            #   animation. This method allows for unique functions with
+            #   unique names as required. Other than having to use meta-
+            #   programming to deal with an arbitrary number / kind of
+            #   animated WaveForms, the animation process is pretty
+            #   standard for matplotlib.
+            if WAVEFORMS[row-1].animated:
+                OSC1_meta_func = \
+"""
+def OSC1_animation_%d(frame, axes, waveforms, OSC1, interval):
+
+    t_size = int(np.round(SAMPLE_RATE*interval))
+
+    t = np.linspace(frame*interval, (frame+1)*interval, t_size)
+
+    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, WAVELENGTHS/OSC1freq,\
+WAVELENGTHS, OSC1freq, t=t, OSC=1)
+
+    size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
+    xdata = np.arange(waveform_[:size].size)
+    OSC1[%d].set_data(xdata, waveform_[:size])
+    axes[%d,0].set_xlim([0,waveform_[:size].size-1])
+    return OSC1,
+"""%(row,row-1,row,row)
+                exec(OSC1_meta_func, globals())
+
+                # time per frame in milliseconds
+                interval = (WAVELENGTHS / OSC1freq)*1000
+                exec('WAVEFORMS[row-1].animations["OSC1"] = \
+animation.FuncAnimation(fig, OSC1_animation_%d, interval=interval, \
+fargs=(axes, WAVEFORMS, OSC1, interval))' %(row))
+
+                OSC2_meta_func = \
+"""
+def OSC2_animation_%d(frame, axes, waveforms, OSC2, interval):
+
+    t_size = int(np.round(SAMPLE_RATE*interval))
+
+    t = np.linspace(frame*interval, (frame+1)*interval, t_size)
+
+    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, WAVELENGTHS/OSC1freq,\
+WAVELENGTHS, OSC2freq, t=t, OSC=2)
+
+    size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
+    xdata = np.arange(waveform_[:size].size)
+    OSC2[%d].set_data(xdata, waveform_[:size])
+    axes[%d,1].set_xlim([0,waveform_[:size].size-1])
+    return OSC2,
+"""%(row,row-1,row,row)
+                exec(OSC2_meta_func, globals())
+
+                # time per frame in milliseconds
+                interval = (WAVELENGTHS / OSC1freq)*1000
+                exec('WAVEFORMS[row-1].animations["OSC2"] = \
+animation.FuncAnimation(fig, OSC2_animation_%d, interval=interval, \
+fargs=(axes, WAVEFORMS, OSC2, interval))' %(row))
+
+        else:
+            # if the plot is animated it doesn't need to be updated, just
+            #    needs to be started once
+            if WAVEFORMS[row-1].animated: continue
+
+            waveform_ = WAVEFORMS[row-1].getWaveform(1, \
+                            SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
+                            WAVELENGTHS, OSC1freq, OSC=1)
+
+            size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
+            xdata = np.arange(waveform_[:size].size)
+            OSC1[row].set_data(xdata, waveform_[:size])
+            axes[row,0].set_xlim([0,waveform_[:size].size-1])
+
+            waveform_ = WAVEFORMS[row-1].getWaveform(1, \
+                            SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
+                            WAVELENGTHS, OSC2freq, OSC=2)
+
+            size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
+            xdata = np.arange(waveform_[:size].size)
+            OSC2[row].set_data(xdata, waveform_[:size])
+            axes[row,1].set_xlim([0,waveform_[:size].size-1])
+
+        fig.canvas.draw_idle()
+
 def Draw(waveforms):
     """
         Draw - Draws the window and runs the main control loop
@@ -283,11 +444,16 @@ def Draw(waveforms):
             None
     """
 
+    global OSC1
+    global OSC2
+    global FIG
+    global AXES
     global OSC1freq
     global OSC2freq
     global SLIDERS
     global BUTTONS
     global WAVEFORMS
+    global ROWS
 
     WAVEFORMS = waveforms
 
@@ -297,22 +463,24 @@ def Draw(waveforms):
         ROWS = len(waveforms) + 1
 
     # create figure and axes with ROWS x COLS separate plots
-    fig, axes = plt.subplots(ROWS+1, COLS+2)
+    FIG, AXES = plt.subplots(ROWS+1, COLS+2)
 
     # create the mixed scope
     grid = plt.GridSpec(ROWS+1,COLS+2)
-    axes[ROWS,0] = plt.subplot(grid[~0,:int(COLS/2)+1])
-    axes[ROWS,1] = plt.subplot(grid[~0,~int(COLS/2)-1])
+    AXES[ROWS,0] = plt.subplot(grid[~0,:int(COLS/2)+1])
+    AXES[ROWS,1] = plt.subplot(grid[~0,~int(COLS/2)-1])
 
     # grids for the sliders and buttons
-    grid2 = fig.add_gridspec(ROWS+1, (COLS+2)*2, left = LEFT, right = RIGHT, \
-        bottom = BOTTOM, top = TOP, wspace=1, hspace=1)
-    grid3 = fig.add_gridspec((ROWS+1)*4, COLS+2, left = LEFT, \
+    grid2 = FIG.add_gridspec(ROWS+1, (COLS+2)*3, left = LEFT, right = RIGHT, \
+        bottom = BOTTOM, top = TOP, wspace=1, hspace=2.5)
+    grid3 = FIG.add_gridspec((ROWS+1)*4, COLS+2, left = LEFT, \
         right = RIGHT, bottom = BOTTOM, top = TOP, wspace=1, hspace=1)
-    grid4 = fig.add_gridspec((ROWS+1)*2, (COLS+2)*2, left = LEFT, \
+    grid4 = FIG.add_gridspec((ROWS+1)*2, (COLS+2)*2, left = LEFT, \
         right = RIGHT, bottom = BOTTOM, top = TOP, wspace=1, hspace=1)
-    grid5 = fig.add_gridspec(ROWS+1, (COLS+2)*12, left = LEFT, \
+    grid5 = FIG.add_gridspec(ROWS+1, (COLS+2)*12, left = LEFT, \
         right = RIGHT, bottom = BOTTOM, top = TOP, wspace=0, hspace=0)
+    grid6 = FIG.add_gridspec((ROWS+1)*2, (COLS+2)*3, left = LEFT, \
+        right = RIGHT, bottom = BOTTOM, top = TOP, wspace=1, hspace=1)
 
     # arrays to save the line objects from each oscillator
     OSC1 = np.empty(ROWS, dtype = object)
@@ -326,7 +494,7 @@ def Draw(waveforms):
         BUTTONS[i] = {}
 
     # add room for the extra objects that require axes (buttons/sliders/etc)
-    axes = np.pad(axes,((0,0),(0,COLS+2)), \
+    AXES = np.pad(AXES,((0,0),(0,COLS+2)), \
             mode='constant', constant_values=None)
 
     def assignButtons():
@@ -367,7 +535,7 @@ def Draw(waveforms):
 
         OSC1freq = SLIDERS[0]["OSC1"].val
         OSC2freq = SLIDERS[0]["OSC2"].val
-        plotWaveforms(False, OSC1freq, OSC2freq)
+        plotWaveforms(False, FIG, AXES, OSC1freq, OSC2freq)
 
     def updateVolume(val):
         """
@@ -410,12 +578,12 @@ def Draw(waveforms):
                 None
         """
 
-        nonlocal OSC1
-        nonlocal OSC2
+        global OSC1
+        global OSC2
         global WAVELENGTHS
 
         WAVELENGTHS = SLIDERS[0]["wavelengths"].val
-        plotWaveforms(False, OSC1freq, OSC2freq)
+        plotWaveforms(False, FIG, AXES, OSC1freq, OSC2freq)
 
     def updateSampleRate(val):
         """
@@ -431,134 +599,14 @@ def Draw(waveforms):
         global SAMPLE_RATE
 
         SAMPLE_RATE = int(SLIDERS[0]["sample_rate"].val)
-        plotWaveforms(False, OSC1freq, OSC2freq)
+        plotWaveforms(False, FIG, AXES, OSC1freq, OSC2freq)
 
-    def plotWaveforms(init, OSC1freq, OSC2freq):
-        """
-            plotWaveforms - Draws the waveforms in the window
-
-            Parameters
-                init - Boolean which should be True if this is the first plot
-
-                OSC1freq - The frequency of OSC1 in hertz
-
-                OSC2freq - The frequency of OSC2 in hertz
-
-            Returns
-                None
-        """
-
-        nonlocal OSC1
-        nonlocal OSC2
-
-        for row in range(1,ROWS):
-
-            if init:
-                OSC1[row], = axes[row, 0].plot(waveforms[row-1].getWaveform(1,\
-                                    SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
-                                    WAVELENGTHS, OSC1freq, OSC=1))
-                OSC2[row], = axes[row, 1].plot(waveforms[row-1].getWaveform(1,\
-                                    SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
-                                    WAVELENGTHS, OSC2freq, OSC=2))
-                # the use of OSC1freq in the calculation for the duration of
-                #   OSC2 in the line above may appear to be a mistake, but it
-                #   is deliberate in order for the difference in freq. between
-                #   OSC1 and OSC2 to be shown
-
-                # set up animated plot if necessary
-                #
-                # This is a bit convoluted, but each animated subplot requires
-                #   a unique animation function. I have decided to use
-                #   meta-programming to define these functions. Below, a string
-                #   is formatted with values specific to the row/WaveForm. This
-                #   string is run as Python code with `exec`, then a secondary
-                #   string is run with `exec` which defines and starts the
-                #   animation. This method allows for unique functions with
-                #   unique names as required. Other than having to use meta-
-                #   programming to deal with an arbitrary number / kind of
-                #   animated WaveForms, the animation process is pretty
-                #   standard for matplotlib.
-                if waveforms[row-1].animated:
-                    OSC1_meta_func = \
-"""
-def OSC1_animation_%d(frame, axes, waveforms, OSC1, interval):
-
-    t_size = int(np.round(SAMPLE_RATE*interval))
-
-    t = np.linspace(frame*interval, (frame+1)*interval, t_size)
-
-    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, WAVELENGTHS/OSC1freq,\
-WAVELENGTHS, OSC1freq, t=t, OSC=1)
-
-    size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
-    xdata = np.arange(waveform_[:size].size)
-    OSC1[%d].set_data(xdata, waveform_[:size])
-    axes[%d,0].set_xlim([0,waveform_[:size].size-1])
-    return OSC1,
-"""%(row,row-1,row,row)
-                    exec(OSC1_meta_func, globals())
-
-                    # time per frame in milliseconds
-                    interval = (WAVELENGTHS / OSC1freq)*1000
-                    exec('waveforms[row-1].animations["OSC1"] = \
-animation.FuncAnimation(fig, OSC1_animation_%d, interval=interval, \
-fargs=(axes, waveforms, OSC1, interval))' %(row))
-
-                    OSC2_meta_func = \
-"""
-def OSC2_animation_%d(frame, axes, waveforms, OSC2, interval):
-
-    t_size = int(np.round(SAMPLE_RATE*interval))
-
-    t = np.linspace(frame*interval, (frame+1)*interval, t_size)
-
-    waveform_ = waveforms[%d].getWaveform(1,SAMPLE_RATE, WAVELENGTHS/OSC1freq,\
-WAVELENGTHS, OSC2freq, t=t, OSC=2)
-
-    size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
-    xdata = np.arange(waveform_[:size].size)
-    OSC2[%d].set_data(xdata, waveform_[:size])
-    axes[%d,1].set_xlim([0,waveform_[:size].size-1])
-    return OSC2,
-"""%(row,row-1,row,row)
-                    exec(OSC2_meta_func, globals())
-
-                    # time per frame in milliseconds
-                    interval = (WAVELENGTHS / OSC1freq)*1000
-                    exec('waveforms[row-1].animations["OSC2"] = \
-animation.FuncAnimation(fig, OSC2_animation_%d, interval=interval, \
-fargs=(axes, waveforms, OSC2, interval))' %(row))
-
-            else:
-                # if the plot is animated it doesn't need to be updated, just
-                #    needs to be started once
-                if waveforms[row-1].animated: continue
-
-                waveform_ = waveforms[row-1].getWaveform(1, \
-                                SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
-                                WAVELENGTHS, OSC1freq, OSC=1)
-
-                size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
-                xdata = np.arange(waveform_[:size].size)
-                OSC1[row].set_data(xdata, waveform_[:size])
-                axes[row,0].set_xlim([0,waveform_[:size].size-1])
-
-                waveform_ = waveforms[row-1].getWaveform(1, \
-                                SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
-                                WAVELENGTHS, OSC2freq, OSC=2)
-
-                size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
-                xdata = np.arange(waveform_[:size].size)
-                OSC2[row].set_data(xdata, waveform_[:size])
-                axes[row,1].set_xlim([0,waveform_[:size].size-1])
-
-            fig.canvas.draw_idle()
 
     # plot all waveforms before formatting
-    plotWaveforms(True, OSC1freq, OSC2freq)
+    plotWaveforms(True, FIG, AXES, OSC1freq, OSC2freq)
 
     # remove ticks from all plots and add sliders
-    for row,ax in enumerate(axes):
+    for row,ax in enumerate(AXES):
         for col,a in enumerate(ax):
 
             # check if the WaveForm on this row needs extra sliders
@@ -575,7 +623,7 @@ fargs=(axes, waveforms, OSC2, interval))' %(row))
 
                         slider_num += 1
 
-                        ax_ = fig.add_subplot(grid5[row,12*(col+1)-slider_num])
+                        ax_ = FIG.add_subplot(grid5[row,12*(col+1)-slider_num])
                         SLIDERS[row][param] = Slider(ax_, "", min_, max_, \
                                         valinit=init_, orientation='vertical')
                         SLIDERS[row][param].valtext.set_visible(False)
@@ -595,31 +643,31 @@ def update_%d(val):
             # check if this is a space where a plot isn't supposed to be
             if col >= COLS or row == 0:
 
-                # some of the axes don't exist yet, so wrap this in a `try`
+                # some of the AXES don't exist yet, so wrap this in a `try`
                 try: a.set_visible(False)
                 except: pass
 
                 # add sliders / buttons
                 if row == 0:
                     if 2 < col < 7:
-                        axes[row,col] = \
-                            fig.add_subplot(grid3[col-3,3:])
+                        AXES[row,col] = \
+                            FIG.add_subplot(grid3[col-3,3:])
 
                         if col == 3:
-                            SLIDERS[row]["volume"] = Slider(axes[row,col], \
+                            SLIDERS[row]["volume"] = Slider(AXES[row,col], \
                                 "Volume", 0, 1, valinit = VOLUME)
                             SLIDERS[row]["volume"].valtext.set_visible(False)
                             SLIDERS[row]["volume"].on_changed(updateVolume)
 
                         if col == 4:
-                            SLIDERS[row]["duration"] = Slider(axes[row,col], \
+                            SLIDERS[row]["duration"] = Slider(AXES[row,col], \
                                 "Duration", 0, 20, valinit = DURATION)
                             SLIDERS[row]["duration"].valtext.set_visible(False)
                             SLIDERS[row]["duration"].on_changed(updateDuration)
 
                         if col == 5:
                             SLIDERS[row]["wavelengths"] = \
-                                Slider(axes[row,col], \
+                                Slider(AXES[row,col], \
                                 "Wavelengths", WAVELENGTHS_MIN, \
                                 WAVELENGTHS_MAX, valinit = WAVELENGTHS, \
                                 closedmin = False)
@@ -628,47 +676,79 @@ def update_%d(val):
 
                         if col == 6:
                             SLIDERS[row]["sample_rate"] = \
-                                Slider(axes[row,col], "Sample Rate", 20000, \
+                                Slider(AXES[row,col], "Sample Rate", 20000, \
                                 96000, valfmt = "%d Hz", \
                                 valinit = SAMPLE_RATE, valstep = 100)
                             SLIDERS[row]["sample_rate"].on_changed( \
                                 updateSampleRate)
 
                     elif col < 2:
-                        axes[row,col] = \
-                        fig.add_subplot(grid2[row,2*col:2*col+2])
+                        AXES[row,col] = \
+                        FIG.add_subplot(grid2[row,3*col:3*col+3])
 
                         if col == 0:
-                            SLIDERS[row]["OSC1"] = Slider(axes[row,col], \
-                                "OSC1\nFreq.", 16.351597, 4186.009045, \
+                            SLIDERS[row]["OSC1"] = Slider(AXES[row,col], \
+                                "", 16.351597, 4186.009045, \
                                 valinit=OSC1freq)
                             SLIDERS[row]["OSC1"].on_changed(updateFreqs)
 
                         elif col == 1:
-                            SLIDERS[row]["OSC2"] = Slider(axes[row,col], \
-                                "OSC2\nFreq.", 16.351597, 4186.009045, \
+                            SLIDERS[row]["OSC2"] = Slider(AXES[row,col], \
+                                "", 16.351597, 4186.009045, \
                                 valinit=OSC2freq)
                             SLIDERS[row]["OSC2"].on_changed(updateFreqs)
 
                 # add play and reset buttons, and mixing sliders
                 else:
                     if col == 2*COLS+2 and row < ROWS:
-                        axes[row,col] = fig.add_subplot(grid4[2*row,col:])
-                        SLIDERS[row]["OSC1"] = Slider(axes[row,col], \
+                        AXES[row,col] = FIG.add_subplot(grid4[2*row,col:])
+                        SLIDERS[row]["OSC1"] = Slider(AXES[row,col], \
                             "OSC1\nLevel", 0, 10, valinit=0)
+                        AXES[row,col] = FIG.add_subplot(grid6[2*row,col+3])
+                        BUTTONS[row]["OSC1rectify"] = Button(AXES[row,col], \
+                            "Rectify\nOSC1")
+
+                        meta_func =\
+"""
+def update_OSC1_rectification_%d(event):
+
+    WAVEFORMS[%d].OSC1rectify = not WAVEFORMS[%d].OSC1rectify
+    plotWaveforms(False, FIG, AXES, OSC1freq, OSC2freq)
+"""%(row,row-1,row-1)
+
+                        exec(meta_func, globals())
+
+                        exec("BUTTONS[%d]['OSC1rectify'].on_clicked( \
+                                    update_OSC1_rectification_%d)"%(row,row))
 
                     elif col == 2*COLS+3 and row < ROWS:
-                        axes[row,col] = fig.add_subplot(grid4[2*row+1,col-1:])
-                        SLIDERS[row]["OSC2"] = Slider(axes[row,col], \
+                        AXES[row,col] = FIG.add_subplot(grid4[2*row+1,col-1:])
+                        SLIDERS[row]["OSC2"] = Slider(AXES[row,col], \
                             "OSC2\nLevel", 0, 10, valinit=0)
+                        AXES[row,col] = FIG.add_subplot(grid6[2*row+1,col+2])
+                        BUTTONS[row]["OSC2rectify"] = Button(AXES[row,col], \
+                            "Rectify\nOSC2")
+
+                        meta_func =\
+"""
+def update_OSC2_rectification_%d(event):
+
+    WAVEFORMS[%d].OSC2rectify = not WAVEFORMS[%d].OSC2rectify
+    plotWaveforms(False, FIG, AXES, OSC1freq, OSC2freq)
+"""%(row,row-1,row-1)
+
+                        exec(meta_func, globals())
+
+                        exec("BUTTONS[%d]['OSC2rectify'].on_clicked( \
+                                    update_OSC2_rectification_%d)"%(row,row))
 
                     elif col == 2*COLS:
-                        axes[row,col] = fig.add_subplot(grid2[row,col])
-                        BUTTONS[row]["Play"] = Button(axes[row,col], "Play")
+                        AXES[row,col] = FIG.add_subplot(grid2[row,col+3])
+                        BUTTONS[row]["Play"] = Button(AXES[row,col], "Play")
 
                     elif col == 2*COLS+1:
-                        axes[row,col] = fig.add_subplot(grid2[row,col])
-                        BUTTONS[row]["Reset"] = Button(axes[row,col], "Reset")
+                        AXES[row,col] = FIG.add_subplot(grid2[row,col+3])
+                        BUTTONS[row]["Reset"] = Button(AXES[row,col], "Reset")
 
                 # skip the rest of this loop for a space that isn't a plot
                 continue
