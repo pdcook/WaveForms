@@ -15,7 +15,9 @@ import threading
     [X] - Add frequency slider functionality
     [X] - Add global volume/duration/wavelength view sliders
     [X] - Clean up global sample_rate variable, allow user to set it in the code
-    [ ] - Add rectification button on each WaveForm
+    [N] - Add rectification button on each WaveForm
+            | Rectified waves are just copies of other waves: boring. Also it broke pulse animation...
+            |
     [ ] - Add mixer
     [ ] - Fourier transforms
 
@@ -45,6 +47,67 @@ COLS = 3    # number of columns in window
 
 # start PyAudio
 pa = pyaudio.PyAudio()
+
+class Mixer:
+    """
+        Mixer - The mixed track in which any number of waveforms across two
+                    oscillators are mixed, plotted, and played
+
+        Attributes
+            waveforms - A list of WaveForms
+
+            levels - A list of dictionaries representing the levels of each
+                        waveform for each oscillator in the form:
+
+              Pos: 0 - WaveForm 0 - [{"OSC1":<OSC1 level>, "OSC2":<OSC2 level>,
+              Pos: 1 - WaveForm 1 -  {"OSC1":<OSC1 level>, "OSC2":<OSC2 level>,
+              Pos: 2 - WaveForm 2 -  {"OSC1":<OSC1 level>, "OSC2":<OSC2 level>,
+              . . .                                                           ]
+
+        Methods
+            TODO
+    """
+
+    def __init__(self, waveforms, levels):
+        self.waveforms = waveforms
+        self.levels = levels
+
+    def getWaveform(self, volume = 0.5, sample_rate = 44100, \
+        duration = None, wavelengths = 1, t = None):
+        """
+            getWaveform - Returns the waveform in an array
+
+            Parameters
+                (Optional) [Default]
+                    volume [0.5] - Float between 0.0 and 1.0 (min and max vol)
+
+                    sample_rate [44100] - The sample rate as an integer
+
+                    duration [1/freq] - The duration in seconds
+
+                    t [None] - array of times to return the waveform using Weq
+
+            Returns
+                waveform - the time-domain waveform as a Numpy array
+        """
+
+        for i,waveform in enumerate(self.waveforms):
+            waveform_OSC1 = waveform.getWaveform(volume, sample_rate, \
+                                duration, wavelengths, OSC1freq, t, 1)
+            waveform_OSC2 = waveform.getWaveform(volume, sample_rate, \
+                                duration, wavelengths, OSC2freq, t, 2)
+            if i == 0:
+                mixer_waveform = np.zeros(waveform_OSC1.size)
+
+            mixer_waveform += self.levels[i]["OSC1"]*waveform_OSC1
+            mixer_waveform += self.levels[i]["OSC2"]*waveform_OSC2
+
+        # normalize to volume
+        mixer_waveform /= np.max(np.abs(mixer_waveform))
+        mixer_waveform *= volume
+
+        return mixer_waveform
+
 
 class WaveForm:
     """
@@ -79,6 +142,7 @@ class WaveForm:
                                     form {key: [OSC, MIN, MAX, INIT]}
 
         Methods
+            TODO
 
         NOTES
             - At least one of Teq, Feq, Weq, or waveform must be specified.
