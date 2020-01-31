@@ -71,6 +71,7 @@ class Mixer:
     def __init__(self, waveforms, levels):
         self.waveforms = waveforms
         self.levels = levels
+        self.animation = None
 
     def getWaveform(self, volume = 0.5, sample_rate = 44100, \
         duration = None, wavelengths = 1, t = None):
@@ -336,7 +337,7 @@ def PlayWave(waveform, volume = 0.5, sample_rate = 44100, duration = 20, \
     stream.stop_stream()
     stream.close()
 
-def Draw(waveforms):
+def Draw(waveforms, mixer):
     """
         Draw - Draws the window and runs the main control loop
 
@@ -352,8 +353,10 @@ def Draw(waveforms):
     global SLIDERS
     global BUTTONS
     global WAVEFORMS
+    global MIXER
 
     WAVEFORMS = waveforms
+    MIXER     = mixer
 
     try:
         ROWS = waveforms.size + 1
@@ -379,8 +382,9 @@ def Draw(waveforms):
         right = RIGHT, bottom = BOTTOM, top = TOP, wspace=0, hspace=0)
 
     # arrays to save the line objects from each oscillator
-    OSC1 = np.empty(ROWS, dtype = object)
-    OSC2 = np.empty(ROWS, dtype = object)
+    OSC1      = np.empty(ROWS, dtype = object)
+    OSC2      = np.empty(ROWS, dtype = object)
+    MixerLine = None
 
     # arrays to save the slider and button objects
     SLIDERS      = np.empty(ROWS+1, dtype = object)
@@ -497,6 +501,23 @@ def Draw(waveforms):
         SAMPLE_RATE = int(SLIDERS[0]["sample_rate"].val)
         plotWaveforms(False, OSC1freq, OSC2freq)
 
+    def updateLevels(val):
+        """
+            updateLevels - Updates mixer levels from sliders
+
+            Parameters
+                val - Value returned by the slider which called the function
+
+            Returns
+                None
+        """
+
+        global MIXER
+
+        for i,waveform in enumerate(WAVEFORMS):
+            MIXER.levels[i]["OSC1"] = SLIDERS[i+1]["OSC1"].val
+            MIXER.levels[i]["OSC2"] = SLIDERS[i+1]["OSC2"].val
+
     def plotWaveforms(init, OSC1freq, OSC2freq):
         """
             plotWaveforms - Draws the waveforms in the window
@@ -514,9 +535,38 @@ def Draw(waveforms):
 
         nonlocal OSC1
         nonlocal OSC2
+        nonlocal MixerLine
+
+        # initialize the Mixer separately
+        if init:
+            MixerLine, = axes[~0,0].plot(MIXER.getWaveform(1, SAMPLE_RATE, \
+                                    WAVELENGTHS/OSC1freq, WAVELENGTHS))
+
+            def Mixer_animation(frame, axes, MixerLine, interval):
+
+                t_size = int(np.round(SAMPLE_RATE*interval))
+
+                t = np.linspace(frame*interval, (frame+1)*interval, t_size)
+
+                waveform_ = MIXER.getWaveform(1,SAMPLE_RATE, \
+                                                WAVELENGTHS/OSC1freq, \
+                                                WAVELENGTHS, t=t)
+
+                size = int(np.round(SAMPLE_RATE/OSC1freq * WAVELENGTHS))
+                xdata = np.arange(waveform_[:size].size)
+
+                MixerLine.set_data(xdata, waveform_[:size])
+                axes[~0,0].set_xlim([0,waveform_[:size].size-1])
+
+                return MixerLine,
+
+            # time per frame in milliseconds
+            interval = (WAVELENGTHS / OSC1freq)*1000
+
+            MIXER.animation = animation.FuncAnimation(fig, Mixer_animation, \
+                          interval=interval, fargs=(axes, MixerLine, interval))
 
         for row in range(1,ROWS):
-
             if init:
                 OSC1[row], = axes[row, 0].plot(waveforms[row-1].getWaveform(1,\
                                     SAMPLE_RATE, WAVELENGTHS/OSC1freq, \
@@ -616,6 +666,9 @@ fargs=(axes, waveforms, OSC2, interval))' %(row))
                 OSC2[row].set_data(xdata, waveform_[:size])
                 axes[row,1].set_xlim([0,waveform_[:size].size-1])
 
+
+        if init:
+            # begin the animations
             fig.canvas.draw_idle()
 
     # plot all waveforms before formatting
@@ -719,12 +772,14 @@ def update_%d(val):
                     if col == 2*COLS+2 and row < ROWS:
                         axes[row,col] = fig.add_subplot(grid4[2*row,col:])
                         SLIDERS[row]["OSC1"] = Slider(axes[row,col], \
-                            "OSC1\nLevel", 0, 10, valinit=0)
+                            "OSC1\nLevel", 0, 1, valinit=0)
+                        SLIDERS[row]["OSC1"].on_changed(updateLevels)
 
                     elif col == 2*COLS+3 and row < ROWS:
                         axes[row,col] = fig.add_subplot(grid4[2*row+1,col-1:])
                         SLIDERS[row]["OSC2"] = Slider(axes[row,col], \
-                            "OSC2\nLevel", 0, 10, valinit=0)
+                            "OSC2\nLevel", 0, 1, valinit=0)
+                        SLIDERS[row]["OSC2"].on_changed(updateLevels)
 
                     elif col == 2*COLS:
                         axes[row,col] = fig.add_subplot(grid2[row,col])
@@ -865,10 +920,15 @@ WhiteNoise = WaveForm("White Noise", Weq=WhiteNoise_Weq, \
 # put WaveForms in order
 WAVEFORMS = [Sine, Triangle, Pulse, Saw, WhiteNoise]
 
+# define the mixer
+levels_init = [{"OSC1":0.0,"OSC2":0.0} for _ in WAVEFORMS]
+
+MIXER = Mixer(WAVEFORMS, levels_init)
+
 # =========================================================================== #
 
 # draw the window
-Draw(WAVEFORMS)
+Draw(WAVEFORMS, MIXER)
 
 # end PyAudio
 pa.terminate()
