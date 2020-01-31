@@ -109,6 +109,47 @@ class Mixer:
 
         return mixer_waveform
 
+    def playWave(self, volume = 0.5, sample_rate = 44100, duration = 20, \
+        freq = 440):
+        """
+            playWave - Play the waveform object, wrapper for PlayWave
+
+            Parameters
+                (Optional) [Default]
+                    volume [0.5] - Float between 0.0 and 1.0 (min and max vol)
+
+                    sample_rate [44100] - The sample rate as an integer
+
+                    duration [20] - The duration in seconds
+
+                    freq [440] - Frequency the waveform is played at (in Hz)
+
+            Returns
+                None
+        """
+
+        # open PlayWave in a separate thread so UI stays responsive
+        t = threading.Thread(target = PlayWave, args = \
+            [self.getWaveform(volume, sample_rate, duration), \
+            volume, sample_rate, duration, freq])
+
+        t.start()
+
+    def playButton(self, event):
+        """
+            playButton - Translates a button press to playWave
+
+            Parameters
+                event - the event that triggered the button via Matplotlib
+
+            Returns
+                None
+        """
+
+        global OSC1freq
+
+        self.playWave(VOLUME, SAMPLE_RATE, DURATION, OSC1freq)
+
 
 class WaveForm:
     """
@@ -418,6 +459,11 @@ def Draw(waveforms, mixer):
 
             if row < ROWS:
                 button.on_clicked(waveforms[row-1].playButton)
+
+            # assign Mixer play button
+            if row == ROWS:
+                button.on_clicked(MIXER.playButton)
+
 
     def updateFreqs(val):
         """
